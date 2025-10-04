@@ -1,0 +1,23 @@
+[project]
+name = "book-writer"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "chromadb>=0.4.22",
+    "ebooklib>=0.18",
+    "markdown>=3.5",
+    "numpy>=1.26.0",
+    "pandas>=2.1.1",
+    "pypdf>=3.17.1",
+    "pyyaml>=6.0.1",
+    "reportlab>=4.0.0",
+    "sentence-transformers>=2.2.2",
+    "torch>=2.1.0",
+    "tqdm>=4.66.1",
+    "transformers>=4.38.0",
+    "sentencepiece>=0.1.99",
+    "ollama>=0.3.3",
+    "gradio>=4.0.0",
+]

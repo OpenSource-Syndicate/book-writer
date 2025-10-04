@@ -1,0 +1,14 @@
+transformers>=4.38.0
+torch>=2.1.0
+chromadb>=0.4.22
+pyyaml>=6.0.1
+sentence-transformers>=2.2.2
+pypdf>=3.17.1
+ebooklib>=0.18
+markdown>=3.5
+reportlab>=4.0.0
+tqdm>=4.66.1
+numpy>=1.26.0
+pandas>=2.1.1
+ollama>=0.3.3
+gradio>=4.0.0
