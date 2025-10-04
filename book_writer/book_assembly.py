@@ -3,6 +3,7 @@ Book Writer System - Book Assembly Module
 Handles assembly of book content into a complete manuscript
 """
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -14,127 +15,356 @@ from tqdm import tqdm
 from book_writer.note_processor import ContentManager
 from book_writer.outline import BookOutline
 
+# Set up logging for the assembly module
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+class AssemblyConfig:
+    """
+    Configuration class for customizing the assembly process.
+    """
+    
+    def __init__(self, 
+                 include_title_page: bool = True,
+                 include_toc: bool = True,
+                 include_part_descriptions: bool = True,
+                 include_chapter_descriptions: bool = True,
+                 include_subtopic_descriptions: bool = True,
+                 content_sorting: str = 'timestamp',  # Options: 'timestamp', 'alpha', 'none'
+                 output_format: str = 'markdown',
+                 custom_separators: Dict[str, str] = None,
+                 processor_options: Dict[str, Any] = None):
+        """
+        Initialize assembly configuration.
+        
+        Args:
+            include_title_page: Whether to include the title page
+            include_toc: Whether to include table of contents
+            include_part_descriptions: Whether to include part descriptions
+            include_chapter_descriptions: Whether to include chapter descriptions
+            include_subtopic_descriptions: Whether to include subtopic descriptions
+            content_sorting: How to sort content ('timestamp', 'alpha', 'none')
+            output_format: Default output format
+            custom_separators: Custom separators for different sections
+            processor_options: Options for specific processors
+        """
+        self.include_title_page = include_title_page
+        self.include_toc = include_toc
+        self.include_part_descriptions = include_part_descriptions
+        self.include_chapter_descriptions = include_chapter_descriptions
+        self.include_subtopic_descriptions = include_subtopic_descriptions
+        self.content_sorting = content_sorting
+        self.output_format = output_format
+        self.custom_separators = custom_separators or {
+            'part': "\n---\n\n",
+            'default': "\n\n"
+        }
+        self.processor_options = processor_options or {}
+
+
+class AssemblyContext:
+    """
+    Holds the context for the assembly process, including outline, content,
+    and intermediate results.
+    """
+    
+    def __init__(self, outline: BookOutline, config: AssemblyConfig = None):
+        self.outline = outline
+        self.content = []  # List of content blocks to be assembled
+        self.metadata = {}  # Additional assembly metadata
+        self.options = {}   # Assembly options and settings
+        self.config = config or AssemblyConfig()  # Assembly configuration
+
+
+class ContentProcessor:
+    """
+    Base class for content processors in the assembly pipeline.
+    Each processor can modify the assembly context during different stages.
+    """
+    
+    def process(self, context: AssemblyContext) -> AssemblyContext:
+        """
+        Process the assembly context and return the (potentially modified) context.
+        
+        Args:
+            context: The current assembly context
+            
+        Returns:
+            The processed assembly context
+        """
+        # Default implementation returns context unchanged
+        return context
+    
+    @property
+    def name(self) -> str:
+        """Get the name of this processor (defaults to class name)."""
+        return self.__class__.__name__
+
+
+class TitleProcessor(ContentProcessor):
+    """
+    Adds title page information to the book content.
+    """
+    
+    def process(self, context: AssemblyContext) -> AssemblyContext:
+        if context.config.include_title_page:
+            # Add title page
+            context.content.append(f"# {context.outline.title}\n")
+            if context.outline.author:
+                context.content.append(f"## By {context.outline.author}\n")
+            if context.outline.description:
+                context.content.append(f"*{context.outline.description}*\n")
+            
+            context.content.append("\n---\n\n")
+        return context
+
+
+class TOCProcessor(ContentProcessor):
+    """
+    Adds a table of contents to the book content.
+    """
+    
+    def process(self, context: AssemblyContext) -> AssemblyContext:
+        if context.config.include_toc:
+            context.content.append("# Table of Contents\n")
+            
+            for i, part in enumerate(context.outline.parts, 1):
+                context.content.append(f"{i}. {part['title']}\n")
+                
+                for j, chapter in enumerate(part['chapters'], 1):
+                    context.content.append(f"   {i}.{j}. {chapter['title']}\n")
+            
+            context.content.append("\n---\n\n")
+        return context
+
+
+class ContentProcessor(ContentProcessor):
+    """
+    Processes the main content from outline parts, chapters, and subtopics.
+    """
+    
+    def __init__(self, content_manager: ContentManager):
+        self.content_manager = content_manager
+    
+    def process(self, context: AssemblyContext) -> AssemblyContext:
+        # Add parts, chapters, and content
+        for part_index, part in enumerate(tqdm(context.outline.parts, desc="Processing parts"), 1):
+            context.content.append(f"# Part {part_index}: {part['title']}\n")
+            
+            if context.config.include_part_descriptions and part.get('description'):
+                context.content.append(f"*{part['description']}*\n\n")
+            
+            for chapter_index, chapter in enumerate(part['chapters'], 1):
+                context.content.append(f"## Chapter {part_index}.{chapter_index}: {chapter['title']}\n")
+                
+                if context.config.include_chapter_descriptions and chapter.get('description'):
+                    context.content.append(f"*{chapter['description']}*\n\n")
+                
+                for subtopic in chapter['subtopics']:
+                    context.content.append(f"### {subtopic['title']}\n")
+                    
+                    if context.config.include_subtopic_descriptions and subtopic.get('description'):
+                        context.content.append(f"*{subtopic['description']}*\n\n")
+                    
+                    # Get content for this subtopic
+                    try:
+                        subtopic_content = self.content_manager.retrieve_content_by_subtopic(subtopic['id'])
+                        
+                        if subtopic_content:
+                            # Sort content based on configuration
+                            if context.config.content_sorting == 'timestamp':
+                                subtopic_content.sort(
+                                    key=lambda x: x['metadata'].get('timestamp', 0)
+                                )
+                            elif context.config.content_sorting == 'alpha':
+                                subtopic_content.sort(
+                                    key=lambda x: x['content'][:50]  # Sort by first 50 chars of content
+                                )
+                            # If 'none', no sorting is applied
+                            
+                            # Add all content for this subtopic
+                            for content_item in subtopic_content:
+                                context.content.append(f"{content_item['content']}\n\n")
+                        else:
+                            context.content.append("*No content available for this subtopic.*\n\n")
+                    except Exception as e:
+                        logger.warning(f"Error retrieving content for subtopic '{subtopic['title']}': {str(e)}")
+                        context.content.append(f"*Error retrieving content for this subtopic: {str(e)}*\n\n")
+                
+                # Add separator between chapters
+                separator = context.config.custom_separators.get('part', "\n---\n\n")
+                context.content.append(separator)
+        
+        return context
+
+
+class AssemblyPipeline:
+    """
+    Orchestrates the book assembly process by running processors in sequence.
+    """
+    
+    def __init__(self, content_manager: ContentManager, processors: List[ContentProcessor] = None):
+        self.content_manager = content_manager
+        self.processors = processors or [
+            TitleProcessor(),
+            TOCProcessor(),
+            ContentProcessor(content_manager)
+        ]
+    
+    def add_processor(self, processor: ContentProcessor, index: int = None):
+        """
+        Add a processor to the pipeline.
+        
+        Args:
+            processor: The processor to add
+            index: Position to insert the processor (defaults to end)
+        """
+        if index is None:
+            self.processors.append(processor)
+        else:
+            self.processors.insert(index, processor)
+    
+    def remove_processor(self, processor_name: str) -> bool:
+        """
+        Remove a processor from the pipeline by name.
+        
+        Args:
+            processor_name: Name of the processor to remove
+            
+        Returns:
+            True if processor was found and removed, False otherwise
+        """
+        for i, processor in enumerate(self.processors):
+            if processor.name == processor_name:
+                del self.processors[i]
+                return True
+        return False
+    
+    def run(self, outline: BookOutline, config: AssemblyConfig = None) -> AssemblyContext:
+        """
+        Run the assembly pipeline on the given outline.
+        
+        Args:
+            outline: The book outline to assemble
+            config: Assembly configuration to use
+            
+        Returns:
+            The final assembly context containing the processed content
+        """
+        context = AssemblyContext(outline, config)
+        
+        for processor in self.processors:
+            context = processor.process(context)
+        
+        return context
+
 
 class BookAssembler:
     """Class for assembling book content into a complete manuscript."""
     
-    def __init__(self, project_path: Union[str, Path], content_manager: ContentManager):
+    def __init__(self, project_path: Union[str, Path], content_manager: ContentManager, 
+                 default_config: AssemblyConfig = None):
         """Initialize a new book assembler.
         
         Args:
             project_path: The path to the project directory
             content_manager: A ContentManager instance for retrieving content
+            default_config: Default assembly configuration
         """
         self.project_path = Path(project_path)
         self.content_manager = content_manager
         self.output_dir = self.project_path / "output"
         self.output_dir.mkdir(exist_ok=True, parents=True)
+        
+        # Set default configuration
+        self.default_config = default_config or AssemblyConfig()
+        
+        # Create the default pipeline
+        self.pipeline = AssemblyPipeline(content_manager)
     
-    def build_book(self, outline: BookOutline, output_format: str = "markdown") -> Path:
+    def build_book(self, outline: BookOutline, output_format: str = "markdown", 
+                   config: AssemblyConfig = None) -> Path:
         """Build a complete book manuscript from the outline and content.
         
         Args:
             outline: The book outline
             output_format: The output format (markdown, html)
+            config: Optional assembly configuration (uses default if not provided)
             
         Returns:
             The path to the built book
         """
-        print(f"Building book: {outline.title}")
+        logger.info(f"Building book: {outline.title}")
         
-        # Create a timestamp for the output file
-        timestamp = int(time.time())
-        
-        # Create the output file path
-        if output_format.lower() == "markdown":
-            output_file = self.output_dir / f"{outline.title.replace(' ', '_').lower()}_{timestamp}.md"
-        elif output_format.lower() == "html":
-            output_file = self.output_dir / f"{outline.title.replace(' ', '_').lower()}_{timestamp}.html"
-        else:
-            raise ValueError(f"Unsupported output format: {output_format}")
-        
-        # Build the book content
-        content = self._build_content(outline)
-        
-        # Write the content to the output file
-        with open(output_file, "w", encoding="utf-8") as f:
-            if output_format.lower() == "html":
-                html_content = markdown.markdown(content)
-                f.write(html_content)
+        try:
+            # Use provided config or default
+            assembly_config = config or self.default_config
+
+            # Create a timestamp for the output file
+            timestamp = int(time.time())
+            
+            # Create the output file path
+            if output_format.lower() == "markdown":
+                output_file = self.output_dir / f"{outline.title.replace(' ', '_').lower()}_{timestamp}.md"
+            elif output_format.lower() == "html":
+                output_file = self.output_dir / f"{outline.title.replace(' ', '_').lower()}_{timestamp}.html"
             else:
-                f.write(content)
-        
-        print(f"Book built successfully: {output_file}")
-        return output_file
+                raise ValueError(f"Unsupported output format: {output_format}")
+            
+            # Run the pipeline to get assembled content
+            logger.info("Starting assembly pipeline...")
+            context = self.pipeline.run(outline, assembly_config)
+            logger.info(f"Pipeline completed, assembled {len(context.content)} content segments")
+            
+            # Join all content segments
+            full_content = "".join(context.content)
+            
+            # Write the content to the output file
+            logger.info(f"Writing content to {output_file}")
+            with open(output_file, "w", encoding="utf-8") as f:
+                if output_format.lower() == "html":
+                    html_content = markdown.markdown(full_content)
+                    f.write(html_content)
+                else:
+                    f.write(full_content)
+            
+            logger.info(f"Book built successfully: {output_file}")
+            return output_file
+        except Exception as e:
+            logger.error(f"Error building book '{outline.title}': {str(e)}")
+            raise
     
-    def _build_content(self, outline: BookOutline) -> str:
-        """Build the book content from the outline.
+    def add_processor(self, processor: ContentProcessor, index: int = None):
+        """
+        Add a processor to the default pipeline.
         
         Args:
-            outline: The book outline
+            processor: The processor to add
+            index: Position to insert the processor (defaults to end)
+        """
+        self.pipeline.add_processor(processor, index)
+    
+    def remove_processor(self, processor_name: str) -> bool:
+        """
+        Remove a processor from the default pipeline.
+        
+        Args:
+            processor_name: Name of the processor to remove
             
         Returns:
-            The complete book content as a string
+            True if processor was found and removed, False otherwise
         """
-        content = []
+        return self.pipeline.remove_processor(processor_name)
+    
+    def get_pipeline(self) -> AssemblyPipeline:
+        """
+        Get the current assembly pipeline.
         
-        # Add title page
-        content.append(f"# {outline.title}\n")
-        if outline.author:
-            content.append(f"## By {outline.author}\n")
-        if outline.description:
-            content.append(f"*{outline.description}*\n")
-        
-        content.append("\n---\n\n")
-        
-        # Add table of contents
-        content.append("# Table of Contents\n")
-        
-        for i, part in enumerate(outline.parts, 1):
-            content.append(f"{i}. {part['title']}\n")
-            
-            for j, chapter in enumerate(part['chapters'], 1):
-                content.append(f"   {i}.{j}. {chapter['title']}\n")
-        
-        content.append("\n---\n\n")
-        
-        # Add parts, chapters, and content
-        for part_index, part in enumerate(tqdm(outline.parts, desc="Processing parts"), 1):
-            content.append(f"# Part {part_index}: {part['title']}\n")
-            
-            if part.get('description'):
-                content.append(f"*{part['description']}*\n\n")
-            
-            for chapter_index, chapter in enumerate(part['chapters'], 1):
-                content.append(f"## Chapter {part_index}.{chapter_index}: {chapter['title']}\n")
-                
-                if chapter.get('description'):
-                    content.append(f"*{chapter['description']}*\n\n")
-                
-                for subtopic in chapter['subtopics']:
-                    content.append(f"### {subtopic['title']}\n")
-                    
-                    if subtopic.get('description'):
-                        content.append(f"*{subtopic['description']}*\n\n")
-                    
-                    # Get content for this subtopic
-                    subtopic_content = self.content_manager.retrieve_content_by_subtopic(subtopic['id'])
-                    
-                    if subtopic_content:
-                        # Sort content by metadata timestamp if available
-                        subtopic_content.sort(
-                            key=lambda x: x['metadata'].get('timestamp', 0)
-                        )
-                        
-                        # Add all content for this subtopic
-                        for content_item in subtopic_content:
-                            content.append(f"{content_item['content']}\n\n")
-                    else:
-                        content.append("*No content available for this subtopic.*\n\n")
-            
-            content.append("\n---\n\n")
-        
-        return "\n".join(content)
+        Returns:
+            The current AssemblyPipeline instance
+        """
+        return self.pipeline
     
     def update_content(self, outline: BookOutline, subtopic_id: str, content_id: str, new_content: str) -> None:
         """Update content in the book.
