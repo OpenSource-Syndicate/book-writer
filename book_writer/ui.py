@@ -10,6 +10,7 @@ from pathlib import Path
 import yaml
 
 from book_writer.app import BookWriterApp
+from book_writer.content_organizer_ui import create_organizer_tab
 
 # --- State Management ---
 
@@ -1054,8 +1055,11 @@ def create_ui():
                     outputs=None
                 )
 
-            with gr.TabItem("📋 Content Organization"):
-                gr.Markdown("## Content Organization")
+            # New enhanced organizer tab
+            create_organizer_tab(app_state)
+            
+            with gr.TabItem("📋 Advanced Organization"):
+                gr.Markdown("## Advanced Content Organization")
                 gr.Markdown("Follow these steps to organize your content:")
                 gr.Markdown("1. **Organize Content:** Click the 'Organize Content' button to automatically cluster your content and get organization suggestions.")
                 gr.Markdown("2. **Review Suggestions:** Review the suggestions for content gaps and reorganization. You can then apply or dismiss these suggestions.")
