@@ -15,6 +15,7 @@ from book_writer.model_manager import model_manager
 from book_writer.outline import BookOutline, create_sample_outline
 from book_writer.note_processor import NoteProcessor, ContentManager
 from book_writer.content_expansion import ContentExpander
+from book_writer.rag_writing import RAGWriter
 
 
 def test_model_connectivity():
@@ -28,11 +29,11 @@ def test_model_connectivity():
         available_models = model_manager.list_available_models()
         print(f"Available models: {available_models}")
         
-        return True
+        assert True
     else:
         print("✗ Ollama service is not accessible")
         print("Please make sure Ollama is running and accessible at the configured URL")
-        return False
+        assert False, "Ollama service is not accessible"
 
 
 def test_content_expansion_model():
@@ -52,14 +53,14 @@ def test_content_expansion_model():
         
         print(f"✓ Content expansion test completed")
         print(f"Response: {response[:200]}...")
-        return True
+        assert response is not None
     except Exception as e:
         print(f"✗ Content expansion test failed: {e}")
-        return False
+        assert False, f"Content expansion test failed: {e}"
 
 
 def test_outline_generation_model():
-    """Test the outline generation model (deepseek-r1:8b)."""
+    """Test the outline generation model (phi3.5:latest)."""
     print("\nTesting outline generation model...")
     
     test_topic = "Machine Learning Fundamentals"
@@ -78,10 +79,10 @@ def test_outline_generation_model():
             print(f"Generated {len(response.get('parts', []))} parts")
         else:
             print(f"Response: {str(response)[:200]}...")
-        return True
+        assert response is not None
     except Exception as e:
         print(f"✗ Outline generation test failed: {e}")
-        return False
+        assert False, f"Outline generation test failed: {e}"
 
 
 def test_organization_model():
@@ -147,10 +148,10 @@ def test_organization_model():
             print(f"Classification: {response.get('chapter_title', 'N/A')} - {response.get('subtopic_title', 'N/A')}")
         else:
             print(f"Response: {str(response)[:200]}...")
-        return True
+        assert response is not None
     except Exception as e:
         print(f"✗ Organization model test failed: {e}")
-        return False
+        assert False, f"Organization model test failed: {e}"
 
 
 def test_full_integration():
@@ -192,16 +193,17 @@ def test_full_integration():
         print(f"Classification: Chapter={classification['chapter']['title'] if classification['chapter'] else 'N/A'}, Subtopic={classification['subtopic']['title'] if classification['subtopic'] else 'N/A'}")
         
         # Clean up
+        note_processor.close()
         import shutil
         shutil.rmtree(test_project_path)
         
         print("✓ Full integration test completed successfully")
-        return True
+        assert True
     except Exception as e:
         print(f"✗ Full integration test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        assert False, f"Full integration test failed: {e}"
 
 
 def test_rag_functionality():
@@ -240,12 +242,12 @@ def test_rag_functionality():
         import shutil
         shutil.rmtree(test_project_path)
         
-        return True
+        assert True
     except Exception as e:
         print(f"✗ RAG functionality test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        assert False, f"RAG functionality test failed: {e}"
 
 
 def test_function_calling():
@@ -280,12 +282,12 @@ def test_function_calling():
         print(f"Search notes result: {result}")
         
         print("✓ Function calling test completed")
-        return True
+        assert True
     except Exception as e:
         print(f"✗ Function calling test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        assert False, f"Function calling test failed: {e}"
 
 
 def main():

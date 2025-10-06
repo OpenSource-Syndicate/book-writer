@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Union, Any, Tuple
 
 from book_writer.note_processor import NoteProcessor, ContentManager
 from book_writer.model_manager import model_manager
+from book_writer.nlp_classifier import create_nlp_classifier
 
 
 class ContentExpander:
@@ -28,6 +29,9 @@ class ContentExpander:
         
         # Use the model manager for Ollama models
         self.model_manager = model_manager
+        
+        # Initialize the NLP classifier for reliable content classification
+        self.nlp_classifier = create_nlp_classifier()
         
         # Check if the model service is accessible
         if not self.model_manager.health_check():
@@ -142,7 +146,7 @@ Expanded Text:
         return prompt.strip()
     
     def classify_content(self, content: str, outline_data: Dict) -> Dict:
-        """Classify content into appropriate chapters and subtopics using the organization model.
+        """Classify content into appropriate chapters and subtopics using reliable NLP algorithms.
         
         Args:
             content: The content to classify
@@ -151,85 +155,30 @@ Expanded Text:
         Returns:
             A dictionary with classification results
         """
-        # Create a prompt for the classification task
-        prompt = f"""
-        Analyze the following content and classify it into the most appropriate chapter and subtopic from the provided outline structure.
-        
-        Content to classify:
-        {content}
-        
-        Book Outline Structure:
-        {json.dumps(outline_data, indent=2)}
-        
-        Please return the classification in the following JSON format:
-        {{
-            "chapter_id": "the ID of the most appropriate chapter",
-            "chapter_title": "the title of the most appropriate chapter",
-            "subtopic_id": "the ID of the most appropriate subtopic",
-            "subtopic_title": "the title of the most appropriate subtopic",
-            "confidence": "a confidence score between 0 and 1"
-        }}
-        
-        If no suitable chapter or subtopic is found, return null values for the IDs and titles.
-        """
+        print(f"NLP Classifying content snippet: {content[:100]}...")
         
         try:
-            # Use the model manager with the organization model to classify content
-            result = self.model_manager.generate_response(
-                prompt=prompt,
-                task="organization",
-                format_json=True,
-                temperature=0.4,
-                max_tokens=512,
-                top_p=0.8
-            )
+            # Use the reliable NLP classifier instead of unreliable AI
+            nlp_result = self.nlp_classifier.classify_content(content, outline_data)
+            print(f"NLP classification result: {nlp_result}")
             
-            if isinstance(result, dict):
-                # Extract the chapter and subtopic information from the response
-                chapter_id = result.get("chapter_id")
-                chapter_title = result.get("chapter_title")
-                subtopic_id = result.get("subtopic_id")
-                subtopic_title = result.get("subtopic_title")
-                
-                # Find the matching chapter and subtopic in the outline data
-                matched_chapter = None
-                matched_subtopic = None
-                
-                for part in outline_data.get("parts", []):
-                    for chapter in part.get("chapters", []):
-                        if chapter["id"] == chapter_id or chapter["title"] == chapter_title:
-                            matched_chapter = {
-                                "id": chapter["id"],
-                                "title": chapter["title"],
-                                "part_id": part["id"]
-                            }
-                            
-                            for subtopic in chapter.get("subtopics", []):
-                                if subtopic["id"] == subtopic_id or subtopic["title"] == subtopic_title:
-                                    matched_subtopic = {
-                                        "id": subtopic["id"],
-                                        "title": subtopic["title"],
-                                        "chapter_id": chapter["id"]
-                                    }
-                                    break
-                            break
-                    if matched_chapter:
-                        break
-                
-                return {
-                    "chapter": matched_chapter,
-                    "subtopic": matched_subtopic,
-                    "chapter_score": result.get("confidence", 0.5),
-                    "subtopic_score": result.get("confidence", 0.5)
-                }
-            else:
-                # Fallback to keyword matching if the model response is not in expected format
-                return self._classify_content_fallback(content, outline_data)
-        
+            # Log cache statistics periodically
+            cache_stats = self.nlp_classifier.get_cache_stats()
+            total_requests = cache_stats["hits"] + cache_stats["misses"]
+            if total_requests > 0 and total_requests % 10 == 0:  # Log every 10 requests
+                hit_rate = cache_stats["hits"] / total_requests * 100
+                print(f"NLP Classifier Cache Stats: Hits: {cache_stats['hits']}, Misses: {cache_stats['misses']}, Hit Rate: {hit_rate:.1f}%")
+            
+            return nlp_result
         except Exception as e:
-            print(f"Error during content classification: {e}")
-            # Fallback to keyword matching if the model approach fails
-            return self._classify_content_fallback(content, outline_data)
+            error_msg = f"Error during NLP content classification: {e}"
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+            # Fallback to keyword matching if the NLP approach fails
+            fallback_result = self._classify_content_fallback(content, outline_data)
+            print(f"Fallback result after error: {fallback_result}")
+            return fallback_result
     
     def _classify_content_fallback(self, content: str, outline_data: Dict) -> Dict:
         """Fallback classification method using keyword matching.
@@ -261,6 +210,9 @@ Expanded Text:
                     })
         
         # Find best matching chapter and subtopic based on simple keyword matching
+        print(f"Using fallback classification for content: {content[:50]}...")
+        print(f"Found {len(chapters)} chapters and {len(subtopics)} subtopics for matching")
+        
         best_chapter = None
         best_chapter_score = 0
         
@@ -274,12 +226,15 @@ Expanded Text:
                 best_chapter_score = score
                 best_chapter = chapter
         
+        print(f"Best chapter match: {best_chapter} (score: {best_chapter_score})")
+        
         best_subtopic = None
         best_subtopic_score = 0
         
         if best_chapter:
             # Only consider subtopics from the best matching chapter
             chapter_subtopics = [s for s in subtopics if s["chapter_id"] == best_chapter["id"]]
+            print(f"Found {len(chapter_subtopics)} subtopics for chapter {best_chapter['id']}")
             
             for subtopic in chapter_subtopics:
                 # Count how many words from the subtopic title appear in the content
@@ -291,12 +246,17 @@ Expanded Text:
                     best_subtopic_score = score
                     best_subtopic = subtopic
         
-        return {
+        print(f"Best subtopic match: {best_subtopic} (score: {best_subtopic_score})")
+        
+        result = {
             "chapter": best_chapter,
             "subtopic": best_subtopic,
             "chapter_score": best_chapter_score,
             "subtopic_score": best_subtopic_score
         }
+        
+        print(f"Fallback classification result: {result}")
+        return result
     
     def process_and_store_note(self, note_id: str, style: str = "academic", outline_data: Dict = None) -> str:
         """Process a note, expand it, classify it, and store the expanded content.

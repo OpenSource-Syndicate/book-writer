@@ -5,6 +5,7 @@ Provides a web-based interface for the Book Writer application.
 """
 import gradio as gr
 import os
+import time
 from pathlib import Path
 import yaml
 
@@ -24,12 +25,12 @@ def get_outline_display(app_state):
 
 # --- UI Event Handlers ---
 
-def create_or_load_project(project_path_str: str):
+def create_or_load_project(project_path_str: str, book_title: str = "My Book", target_pages: int = 100):
     """Creates or loads a project."""
     project_path = Path(project_path_str)
     if not project_path.exists():
         gr.Info(f"Project path not found. Creating new project at: {project_path}")
-        app = BookWriterApp.create_project(project_path)
+        app = BookWriterApp.create_project(project_path, book_title=book_title, target_pages=target_pages)
     else:
         gr.Info(f"Loading existing project from: {project_path}")
         app = BookWriterApp(project_path)
@@ -73,11 +74,14 @@ def expand_note_stream_with_real_time(app_state, note_id, style):
             include=["documents", "metadatas"]
         )
         
-        if not results["ids"]:
+        results_ids = results.get("ids", [])
+        if not results_ids:
             raise ValueError(f"Note with ID {note_id} not found")
         
-        note_text = results["documents"][0]
-        metadata = results["metadatas"][0]
+        results_docs = results.get("documents", [])
+        results_metas = results.get("metadatas", [])
+        note_text = results_docs[0] if results_docs else ""
+        metadata = results_metas[0] if results_metas else {}
         
         # Create prompt
         expander = app_state.content_expander
@@ -154,62 +158,215 @@ async def save_edited_content_async(app_state, current_content_id, new_text):
         gr.Error(f"Failed to save changes: {e}")
 
 # Content Organization Functions
+def create_outline_tree_html(outline_dict, note_assignments=None):
+    """Create an HTML representation of the outline tree with assignment indicators."""
+    if not outline_dict:
+        return "<p>No outline loaded.</p>"
+    
+    if note_assignments is None:
+        note_assignments = {}
+    
+    html = '<div class="outline-tree">'
+    html += '<ul class="outline-root">'
+    
+    for part_idx, part in enumerate(outline_dict.get("parts", [])):
+        part_id = part.get("id", f"part-{part_idx}")
+        part_title = part.get("title", "Untitled Part")
+        
+        # Count notes assigned to this part
+        part_note_count = sum(1 for aid, (pid, cid, stid) in note_assignments.items() if pid == part_id)
+        
+        html += f'''
+        <li class="outline-part">
+            <div class="outline-item-header">
+                <span class="toggle-btn">▼</span>
+                <span class="outline-part-title">{part_title}</span>
+                <span class="note-count">[{part_note_count} notes]</span>
+            </div>
+            <div class="outline-children">
+                <ul class="outline-chapters">
+        '''
+        
+        for chap_idx, chapter in enumerate(part.get("chapters", [])):
+            chapter_id = chapter.get("id", f"chapter-{part_idx}-{chap_idx}")
+            chapter_title = chapter.get("title", "Untitled Chapter")
+            
+            # Count notes assigned to this chapter
+            chapter_note_count = sum(1 for aid, (pid, cid, stid) in note_assignments.items() if cid == chapter_id)
+            
+            html += f'''
+                <li class="outline-chapter">
+                    <div class="outline-item-header">
+                        <span class="toggle-btn">▼</span>
+                        <span class="outline-chapter-title">{chapter_title}</span>
+                        <span class="note-count">[{chapter_note_count} notes]</span>
+                    </div>
+                    <div class="outline-children">
+                        <ul class="outline-subtopics">
+            '''
+            
+            for st_idx, subtopic in enumerate(chapter.get("subtopics", [])):
+                subtopic_id = subtopic.get("id", f"subtopic-{part_idx}-{chap_idx}-{st_idx}")
+                subtopic_title = subtopic.get("title", "Untitled Subtopic")
+                
+                # Count notes assigned to this subtopic
+                subtopic_note_count = sum(1 for aid, (pid, cid, stid) in note_assignments.items() if stid == subtopic_id)
+                
+                html += f'''
+                    <li class="outline-subtopic">
+                        <div class="outline-item-header">
+                            <span class="outline-subtopic-title">{subtopic_title}</span>
+                            <span class="note-count">[{subtopic_note_count} notes]</span>
+                        </div>
+                    </li>
+                '''
+            
+            html += '''
+                        </ul>
+                    </div>
+                </li>
+            '''
+        
+        html += '''
+                </ul>
+            </div>
+        </li>
+        '''
+    
+    html += '</ul>'
+    html += '</div>'
+    
+    # Add CSS for the tree structure
+    css = '''
+    <style>
+        .outline-tree {
+            font-family: Arial, sans-serif;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+        }
+        .outline-root {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .outline-part, .outline-chapter, .outline-subtopic {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+        .outline-item-header {
+            padding: 5px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .outline-part:hover, .outline-chapter:hover {
+            background-color: #f5f5f5;
+        }
+        .outline-part-title {
+            font-weight: bold;
+            color: #2c5aa0;
+        }
+        .outline-chapter-title {
+            color: #3a66c1;
+        }
+        .outline-subtopic-title {
+            color: #555;
+            font-style: italic;
+        }
+        .note-count {
+            background-color: #e7f3ff;
+            border-radius: 12px;
+            padding: 2px 8px;
+            font-size: 0.8em;
+        }
+        .outline-children {
+            margin-left: 20px;
+            display: block; /* Default to expanded */
+        }
+        .toggle-btn {
+            cursor: pointer;
+            margin-right: 8px;
+            width: 20px;
+        }
+    </style>
+    '''
+    
+    return css + html
+
+
 def refresh_outline_tree(app_state):
     """Refresh the outline structure display with assignment indicators."""
     if not app_state or not app_state.current_outline:
         return "No outline loaded."
     
-    # Convert the outline to a tree-like structure for display
+    # Convert the outline to a dictionary structure
     outline_dict = app_state.current_outline.to_dict()
     
     # Get all notes and their classifications to add to the outline display
+    note_assignments = {}  # Structure: {note_id: (part_id, chapter_id, subtopic_id)}
     try:
         all_notes = app_state.note_processor.notes_collection.get(include=["documents", "metadatas"])
-        if all_notes["ids"]:
-            # Add note assignment information to the outline structure
-            for i, note_id in enumerate(all_notes["ids"]):
-                metadata = all_notes["metadatas"][i]
+        all_note_ids = all_notes.get("ids", [])
+        if all_note_ids:
+            all_note_metadatas = all_notes.get("metadatas", [])
+            for i, note_id in enumerate(all_note_ids):
+                metadata = all_note_metadatas[i] if i < len(all_note_metadatas) else {}
                 chapter_id = metadata.get("chapter_id")
                 subtopic_id = metadata.get("subtopic_id")
                 
+                # Find the corresponding part_id for the chapter
+                part_id = None
                 if chapter_id and subtopic_id:
-                    # Find the chapter and subtopic in the outline and add note count/indicators
                     for part in outline_dict.get("parts", []):
                         for chapter in part.get("chapters", []):
                             if chapter["id"] == chapter_id:
-                                # Add note assignment info to the chapter
-                                if "assigned_notes" not in chapter:
-                                    chapter["assigned_notes"] = []
-                                chapter["assigned_notes"].append(note_id)
-                                
-                                for subtopic in chapter.get("subtopics", []):
-                                    if subtopic["id"] == subtopic_id:
-                                        if "assigned_notes" not in subtopic:
-                                            subtopic["assigned_notes"] = []
-                                        subtopic["assigned_notes"].append(note_id)
+                                part_id = part["id"]
+                                break
+                        if part_id:
+                            break
+                
+                if part_id and chapter_id and subtopic_id:
+                    note_assignments[note_id] = (part_id, chapter_id, subtopic_id)
     except Exception:
-        # If there's an error getting note assignments, just return the basic outline
+        # If there's an error getting note assignments, continue with empty assignments
         pass
     
-    return outline_dict
+    # Create the HTML representation of the outline tree
+    return create_outline_tree_html(outline_dict, note_assignments)
 
-def get_available_notes(app_state):
-    """Get a list of available notes for assignment."""
+def get_available_notes(app_state, search_query=""):
+    """Get a list of available notes for assignment, optionally filtered by search query."""
     if not app_state:
         return []
     
     try:
         # Get all notes from the notes collection
         all_notes = app_state.note_processor.notes_collection.get(include=["documents", "metadatas"])
-        if not all_notes["ids"]:
+        all_note_ids = all_notes.get("ids", [])
+        if not all_note_ids:
             return []
         
         # Create a list of note options with ID and preview
         note_options = []
-        for i, note_id in enumerate(all_notes["ids"]):
-            note_doc = all_notes["documents"][i]
+        search_query = search_query.lower() if search_query else ""
+        
+        all_note_docs = all_notes.get("documents", [])
+        for i, note_id in enumerate(all_note_ids):
+            note_doc = all_note_docs[i] if i < len(all_note_docs) else ""
             preview = note_doc[:50] + "..." if len(note_doc) > 50 else note_doc
-            note_options.append(f"{note_id}: {preview}")
+            
+            # If search query is specified, filter notes
+            if search_query:
+                if search_query in note_doc.lower() or search_query in note_id.lower():
+                    note_options.append(f"{note_id}: {preview}")
+            else:
+                # If no search query, add all notes
+                note_options.append(f"{note_id}: {preview}")
         
         return note_options
     except Exception:
@@ -271,7 +428,409 @@ def assign_notes_to_section(app_state, selected_notes, target_section):
         return f"Error: {e}"
 
 def auto_organize_notes(app_state, custom_rules=None):
-    """Automatically organize notes based on content analysis."""
+    """Automatically organize notes based on enhanced content analysis."""
+    # Print to console for debugging
+    print("Starting auto-organization process...")
+    
+    if not app_state:
+        error_msg = "Please load a project first."
+        print(f"ERROR: {error_msg}")
+        gr.Warning(error_msg)
+        return error_msg
+    
+    if not app_state.current_outline:
+        error_msg = "Please load an outline first."
+        print(f"ERROR: {error_msg}")
+        gr.Warning(error_msg)
+        return error_msg
+    
+    try:
+        print("Fetching notes for organization...")
+        # Get all unorganized notes
+        all_notes = app_state.note_processor.notes_collection.get(include=["documents", "metadatas"])
+        all_note_ids = all_notes.get("ids", [])
+        if not all_note_ids:
+            msg = "No notes to organize."
+            print(msg)
+            return msg
+        
+        total_notes = len(all_note_ids)
+        organized_count = 0
+        skipped_count = 0
+        error_count = 0
+        failed_notes = []
+        
+        print(f"Processing {total_notes} notes...")
+        gr.Info(f"Starting auto-organization of {total_notes} notes...")
+        
+        all_note_docs = all_notes.get("documents", [])
+        all_note_metadatas = all_notes.get("metadatas", [])
+        for i, note_id in enumerate(all_note_ids):
+            note_text = all_note_docs[i] if i < len(all_note_docs) else ""
+            note_metadata = all_note_metadatas[i] if i < len(all_note_metadatas) else {}
+            
+            # Create a preview of the note text for better logging
+            note_preview = note_text[:50] + "..." if len(note_text) > 50 else note_text
+            print(f"Processing note {i+1}/{total_notes}: {note_id[:8]}... ({note_preview})")
+            gr.Info(f"Processing note {i+1}/{total_notes}: {note_id[:8]}...")
+            
+            # Skip if note is already assigned to a specific section
+            if note_metadata.get("chapter_id") and note_metadata.get("subtopic_id"):
+                print(f"  Skipping note {note_id[:8]}... - already assigned")
+                skipped_count += 1
+                continue
+            
+            # Use enhanced content classification to determine where to place the note
+            try:
+                print(f"  Classifying note {note_id[:8]}...")
+                # Use the content expander's classify_content function with enhanced logic
+                if custom_rules:
+                    # Apply custom rules if provided
+                    print("  Using custom rules for classification")
+                    # For now, we'll use the standard classification with custom rules as parameters
+                    classification = app_state.content_expander.classify_content(
+                        note_text, 
+                        app_state.current_outline.to_dict()
+                    )
+                else:
+                    print("  Using standard classification")
+                    classification = app_state.content_expander.classify_content(
+                        note_text, 
+                        app_state.current_outline.to_dict()
+                    )
+                
+                print(f"  Classification result for {note_id[:8]}...: {classification is not None}")
+                
+                # Verify the classification result
+                if classification and classification.get("chapter") and classification.get("subtopic"):
+                    print(f"  Valid classification found for {note_id[:8]}...")
+                    # Update the note's metadata to include chapter/subtopic assignment
+                    results = app_state.note_processor.notes_collection.get(
+                        ids=[note_id],
+                        include=["metadatas"]
+                    )
+                    
+                    results_ids = results.get("ids", [])
+                    if results_ids:
+                        print(f"  Updating metadata for note {note_id[:8]}...")
+                        results_metas = results.get("metadatas", [])
+                        metadata = results_metas[0] if results_metas else {}
+                        metadata["chapter_id"] = classification["chapter"]["id"]
+                        metadata["subtopic_id"] = classification["subtopic"]["id"]
+                        
+                        # Additional metadata to track organization
+                        metadata["organized_by"] = "auto"
+                        metadata["organized_date"] = str(time.time())
+                        
+                        # Filter out any None values from metadata as ChromaDB doesn't accept them
+                        filtered_metadata = {k: v for k, v in metadata.items() if v is not None}
+                        
+                        # Update in ChromaDB
+                        app_state.note_processor.notes_collection.update(
+                            ids=[note_id],
+                            metadatas=[filtered_metadata]
+                        )
+                        
+                        organized_count += 1
+                        print(f"  Successfully organized note {note_id[:8]}...")
+                        gr.Info(f"Successfully organized note: {note_id[:8]}...")
+                    else:
+                        error_msg = f"Failed to get metadata for note {note_id[:8]}..."
+                        print(f"  ERROR: {error_msg}")
+                        failed_notes.append((note_id, error_msg))
+                        error_count += 1
+                else:
+                    # If classification didn't return valid results, log as error
+                    error_msg = f"No valid classification for note {note_id[:8]}..."
+                    print(f"  ERROR: {error_msg}")
+                    failed_notes.append((note_id, error_msg))
+                    error_count += 1
+            except Exception as e:
+                error_msg = f"Failed to classify note {note_id[:8]}...: {str(e)}"
+                print(f"  EXCEPTION: {error_msg}")
+                failed_notes.append((note_id, error_msg))
+                gr.Warning(error_msg)
+                error_count += 1
+        
+        # Prepare detailed result message
+        result_details = []
+        result_details.append(f"Auto-organization completed:")
+        result_details.append(f"  - Total notes processed: {total_notes}")
+        result_details.append(f"  - Successfully organized: {organized_count}")
+        result_details.append(f"  - Skipped (already assigned): {skipped_count}")
+        result_details.append(f"  - Errors: {error_count}")
+        
+        if failed_notes:
+            result_details.append(f"\nFailed notes:")
+            for note_id, error in failed_notes[:5]:  # Show first 5 failures
+                result_details.append(f"  - {note_id[:8]}...: {error}")
+            if len(failed_notes) > 5:
+                result_details.append(f"  ... and {len(failed_notes) - 5} more")
+        
+        result = "\n".join(result_details)
+        print(result)
+        
+        if error_count == 0:
+            success_msg = f"Success! Organized {organized_count} notes."
+            gr.Info(success_msg)
+        else:
+            warning_msg = f"Completed with {error_count} errors. Check console for details."
+            gr.Warning(warning_msg)
+            
+        return result
+    except Exception as e:
+        error_msg = f"Failed to auto-organize notes: {e}"
+        print(f"CRITICAL ERROR: {error_msg}")
+        import traceback
+        traceback.print_exc()
+        gr.Error(error_msg)
+        return f"Error: {e}"
+
+def parse_keyword_rules(rules_text):
+    """Parse keyword rules from text input."""
+    rules = {}
+    if not rules_text:
+        return rules
+    
+    try:
+        rule_pairs = rules_text.split(';')
+        for pair in rule_pairs:
+            pair = pair.strip()
+            if not pair:
+                continue
+                
+            parts = pair.split(':')
+            if len(parts) >= 4:
+                keyword = parts[0].strip().lower()
+                part_id = parts[1].strip()
+                chapter_id = parts[2].strip()
+                subtopic_id = parts[3].strip()
+                
+                # Store the rule with the keyword as key
+                rules[keyword] = (part_id, chapter_id, subtopic_id)
+    except Exception as e:
+        print(f"Error parsing keyword rules: {e}")
+    
+    return rules
+
+
+def find_notes_needing_review(app_state):
+    """Find notes that may need human review before assignment."""
+    return _get_current_review_queue(app_state)
+
+
+def approve_assignment(app_state, selected_note):
+    """Approve the assignment of a note and return updated review queue."""
+    if not app_state:
+        gr.Warning("Please load a project first.")
+        return []
+    
+    if not selected_note:
+        gr.Warning("Please select a note to approve.")
+        # Return current review queue when nothing is selected
+        return _get_current_review_queue(app_state)
+    
+    try:
+        # Extract note ID from the selection (format: "note_id: preview text")
+        note_id = selected_note.split(":")[0] if ":" in selected_note else selected_note
+        
+        # Update the note's metadata to mark it as approved
+        results = app_state.note_processor.notes_collection.get(
+            ids=[note_id],
+            include=["metadatas"]
+        )
+        
+        results_ids = results.get("ids", [])
+        if results_ids:
+            results_metas = results.get("metadatas", [])
+            metadata = results_metas[0] if results_metas else {}
+            # Mark as reviewed and approved
+            metadata["reviewed"] = True
+            metadata["review_status"] = "approved"
+            metadata["reviewed_date"] = str(time.time())
+            
+            # Filter out any None values from metadata as ChromaDB doesn't accept them
+            filtered_metadata = {k: v for k, v in metadata.items() if v is not None}
+            
+            # Update in ChromaDB
+            app_state.note_processor.notes_collection.update(
+                ids=[note_id],
+                metadatas=[filtered_metadata]
+            )
+            
+            gr.Info(f"Note {note_id[:8]}... approved for assignment.")
+        else:
+            gr.Warning(f"Note not found: {note_id}")
+        
+        # Return the updated review queue (notes that still need review)
+        return _get_current_review_queue(app_state)
+    except Exception as e:
+        gr.Error(f"Failed to approve note assignment: {e}")
+        # Return current review queue even if there's an error
+        return _get_current_review_queue(app_state)
+
+
+def _get_current_review_queue(app_state):
+    """Helper function to get the current list of notes needing review."""
+    if not app_state:
+        return []
+    
+    if not app_state.current_outline:
+        return []
+    
+    try:
+        # Get all notes
+        all_notes = app_state.note_processor.notes_collection.get(include=["documents", "metadatas"])
+        all_note_ids = all_notes.get("ids", [])
+        if not all_note_ids:
+            return []
+        
+        review_candidates = []
+        
+        all_note_docs = all_notes.get("documents", [])
+        all_note_metadatas = all_notes.get("metadatas", [])
+        for i, note_id in enumerate(all_note_ids):
+            note_text = all_note_docs[i] if i < len(all_note_docs) else ""
+            note_metadata = all_note_metadatas[i] if i < len(all_note_metadatas) else {}
+            
+            # Notes that haven't been assigned yet are candidates for review
+            if not note_metadata.get("chapter_id") or not note_metadata.get("subtopic_id"):
+                preview = note_text[:50] + "..." if len(note_text) > 50 else note_text
+                review_candidates.append(f"{note_id}: {preview}")
+            # Notes with low confidence scores or specific status markers could also be added
+            elif note_metadata.get("organization_confidence", 1.0) < 0.5:
+                preview = note_text[:50] + "..." if len(note_text) > 50 else note_text
+                review_candidates.append(f"{note_id}: {preview} [low confidence]")
+        
+        return review_candidates
+    except Exception as e:
+        gr.Error(f"Failed to get review queue: {e}")
+        return []
+
+
+def get_organization_statistics(app_state):
+    """Get statistics about note organization."""
+    if not app_state:
+        return "No project loaded."
+    
+    if not app_state.current_outline:
+        return "No outline loaded."
+    
+    try:
+        # Get all notes
+        all_notes = app_state.note_processor.notes_collection.get(include=["documents", "metadatas"])
+        all_note_ids = all_notes.get("ids", [])
+        if not all_note_ids:
+            return "No notes in the system."
+        total_notes = len(all_note_ids)
+        assigned_notes = 0
+        unassigned_notes = 0
+        reviewed_notes = 0
+        low_confidence_notes = 0
+        
+        # Count assigned vs unassigned
+        all_note_metadatas = all_notes.get("metadatas", [])
+        for i, note_id in enumerate(all_note_ids):
+            metadata = all_note_metadatas[i] if i < len(all_note_metadatas) else {}
+            
+            if metadata.get("chapter_id") and metadata.get("subtopic_id"):
+                assigned_notes += 1
+            else:
+                unassigned_notes += 1
+                
+            if metadata.get("reviewed"):
+                reviewed_notes += 1
+                
+            if metadata.get("organization_confidence", 1.0) < 0.5:
+                low_confidence_notes += 1
+        
+        # Get outline structure info
+        outline = app_state.current_outline.to_dict()
+        total_parts = len(outline.get("parts", []))
+        total_chapters = 0
+        total_subtopics = 0
+        
+        for part in outline.get("parts", []):
+            total_chapters += len(part.get("chapters", []))
+            for chapter in part.get("chapters", []):
+                total_subtopics += len(chapter.get("subtopics", []))
+        
+        # Create statistics summary
+        stats = f"""Organization Statistics
+==================
+Total Notes: {total_notes}
+Assigned Notes: {assigned_notes}
+Unassigned Notes: {unassigned_notes}
+Notes with Review Status: {reviewed_notes}
+Low Confidence Assignments: {low_confidence_notes}
+
+Outline Structure:
+- Parts: {total_parts}
+- Chapters: {total_chapters}
+- Subtopics: {total_subtopics}
+
+Organization Progress: 
+- {(assigned_notes/total_notes*100):.1f}% of notes assigned ({assigned_notes}/{total_notes})
+"""
+        
+        return stats
+    except Exception as e:
+        return f"Error calculating statistics: {e}"
+
+
+def reject_assignment(app_state, selected_note):
+    """Mark a note as needing revision and return updated review queue."""
+    if not app_state:
+        gr.Warning("Please load a project first.")
+        return []
+    
+    if not selected_note:
+        gr.Warning("Please select a note to reject.")
+        # Return current review queue when nothing is selected
+        return _get_current_review_queue(app_state)
+    
+    try:
+        # Extract note ID from the selection (format: "note_id: preview text")
+        note_id = selected_note.split(":")[0] if ":" in selected_note else selected_note
+        
+        # Update the note's metadata to mark it as needing revision
+        results = app_state.note_processor.notes_collection.get(
+            ids=[note_id],
+            include=["metadatas"]
+        )
+        
+        results_ids = results.get("ids", [])
+        if results_ids:
+            results_metas = results.get("metadatas", [])
+            metadata = results_metas[0] if results_metas else {}
+            # Mark as reviewed but needing revision
+            metadata["reviewed"] = True
+            metadata["review_status"] = "needs_revision"
+            metadata["reviewed_date"] = str(time.time())
+            
+            # Filter out any None values from metadata as ChromaDB doesn't accept them
+            filtered_metadata = {k: v for k, v in metadata.items() if v is not None}
+            
+            # Update in ChromaDB
+            app_state.note_processor.notes_collection.update(
+                ids=[note_id],
+                metadatas=[filtered_metadata]
+            )
+            
+            gr.Info(f"Note {note_id[:8]}... marked for revision.")
+        else:
+            gr.Warning(f"Note not found: {note_id}")
+        
+        # Return the updated review queue (notes that still need review)
+        return _get_current_review_queue(app_state)
+    except Exception as e:
+        gr.Error(f"Failed to reject note assignment: {e}")
+        # Return current review queue even if there's an error
+        return _get_current_review_queue(app_state)
+
+
+def apply_keyword_rules_to_notes(app_state, rules_text):
+    """Apply keyword-based rules to organize notes."""
     if not app_state:
         gr.Warning("Please load a project first.")
         return "No project loaded."
@@ -280,65 +839,68 @@ def auto_organize_notes(app_state, custom_rules=None):
         gr.Warning("Please load an outline first.")
         return "No outline loaded."
     
+    # Parse the rules
+    keyword_rules = parse_keyword_rules(rules_text)
+    if not keyword_rules:
+        gr.Warning("No valid rules found. Please check the format.")
+        return "No rules applied."
+    
     try:
-        # Get all unorganized notes
+        # Get all notes
         all_notes = app_state.note_processor.notes_collection.get(include=["documents", "metadatas"])
-        if not all_notes["ids"]:
+        all_note_ids = all_notes.get("ids", [])
+        if not all_note_ids:
             return "No notes to organize."
         
         organized_count = 0
-        for i, note_id in enumerate(all_notes["ids"]):
-            note_text = all_notes["documents"][i]
-            note_metadata = all_notes["metadatas"][i]
+        
+        all_note_docs = all_notes.get("documents", [])
+        all_note_metadatas = all_notes.get("metadatas", [])
+        for i, note_id in enumerate(all_note_ids):
+            note_text = all_note_docs[i].lower() if i < len(all_note_docs) else ""
+            note_metadata = all_note_metadatas[i] if i < len(all_note_metadatas) else {}
             
-            # Skip if note is already assigned to a specific section
+            # Skip if note is already assigned
             if note_metadata.get("chapter_id") and note_metadata.get("subtopic_id"):
                 continue
             
-            # Use content classification to determine where to place the note
-            # If custom rules are provided, use them to influence the classification
-            if custom_rules:
-                # For now, we'll just use the standard classification
-                # In a more sophisticated implementation, custom_rules could be used to influence the classification
-                classification = app_state.content_expander.classify_content(
-                    note_text, 
-                    app_state.current_outline.to_dict()
-                )
-            else:
-                classification = app_state.content_expander.classify_content(
-                    note_text, 
-                    app_state.current_outline.to_dict()
-                )
-            
-            if classification["chapter"] and classification["subtopic"]:
-                # Update the note's metadata to include chapter/subtopic assignment
-                results = app_state.note_processor.notes_collection.get(
-                    ids=[note_id],
-                    include=["metadatas"]
-                )
-                
-                if results["ids"]:
-                    metadata = results["metadatas"][0]
-                    metadata["chapter_id"] = classification["chapter"]["id"]
-                    metadata["subtopic_id"] = classification["subtopic"]["id"]
-                    
-                    # Filter out any None values from metadata as ChromaDB doesn't accept them
-                    filtered_metadata = {k: v for k, v in metadata.items() if v is not None}
-                    
-                    # Update in ChromaDB
-                    app_state.note_processor.notes_collection.update(
+            # Check if any keyword rule applies to this note
+            for keyword, (part_id, chapter_id, subtopic_id) in keyword_rules.items():
+                if keyword in note_text:
+                    # Update the note's metadata with the matched assignment
+                    results = app_state.note_processor.notes_collection.get(
                         ids=[note_id],
-                        metadatas=[filtered_metadata]
+                        include=["metadatas"]
                     )
                     
-                    organized_count += 1
+                    results_ids = results.get("ids", [])
+                    if results_ids:
+                        results_metas = results.get("metadatas", [])
+                        metadata = results_metas[0] if results_metas else {}
+                        metadata["chapter_id"] = chapter_id
+                        metadata["subtopic_id"] = subtopic_id
+                        metadata["organized_by"] = "keyword_rule"
+                        metadata["organized_date"] = str(time.time())
+                        
+                        # Filter out any None values from metadata as ChromaDB doesn't accept them
+                        filtered_metadata = {k: v for k, v in metadata.items() if v is not None}
+                        
+                        # Update in ChromaDB
+                        app_state.note_processor.notes_collection.update(
+                            ids=[note_id],
+                            metadatas=[filtered_metadata]
+                        )
+                        
+                        organized_count += 1
+                        break  # Only apply the first matching rule
         
-        result = f"Auto-organized {organized_count} notes into appropriate sections."
+        result = f"Applied keyword rules: {organized_count} notes organized based on keywords."
         gr.Info(result)
         return result
     except Exception as e:
-        gr.Error(f"Failed to auto-organize notes: {e}")
+        gr.Error(f"Failed to apply keyword rules: {e}")
         return f"Error: {e}"
+
 
 def customize_organization_rules(app_state):
     """Allow users to customize organization rules."""
@@ -367,8 +929,10 @@ def load_content_for_editor(app_state, section_type, section_id):
                 include=["documents", "metadatas"]
             )
             
-            if results["ids"]:
-                content = results["documents"][0] 
+            results_ids = results.get("ids", [])
+            if results_ids:
+                results_docs = results.get("documents", [])
+                content = results_docs[0] if results_docs else ""
                 return content, section_id
             else:
                 return "Note not found.", ""
@@ -408,8 +972,10 @@ def save_content_from_editor(app_state, content_id, new_content):
                     include=["documents", "metadatas"]
                 )
                 
-                if note_results["ids"]:
-                    note_metadata = note_results["metadatas"][0]
+                note_results_ids = note_results.get("ids", [])
+                if note_results_ids:
+                    note_results_metas = note_results.get("metadatas", [])
+                    note_metadata = note_results_metas[0] if note_results_metas else {}
                     # Create content from the note
                     content_id_new = app_state.content_manager.store_content(
                         content=new_content,
@@ -458,6 +1024,8 @@ def create_ui():
             with gr.TabItem("🚀 Project"):
                 gr.Markdown("## Project Management")
                 project_path_input = gr.Textbox(label="Project Directory", placeholder="/path/to/your/book_project", lines=1)
+                book_title_input = gr.Textbox(label="Book Title", placeholder="Enter the title of your book", value="My Book", lines=1)
+                target_pages_input = gr.Number(label="Target Number of Pages", value=100, minimum=1, maximum=10000, step=1)
                 load_project_btn = gr.Button("Create or Load Project", variant="primary")
                 project_path_display = gr.Textbox(label="Current Project Path", interactive=False)
 
@@ -488,26 +1056,27 @@ def create_ui():
 
             with gr.TabItem("📋 Content Organization"):
                 gr.Markdown("## Content Organization")
-                with gr.Row():
-                    with gr.Column(scale=2):
-                        gr.Markdown("### Outline Structure")
-                        outline_tree = gr.JSON(label="Outline Structure")
-                        refresh_outline_btn = gr.Button("Refresh Outline", variant="secondary")
-                        
-                        gr.Markdown("### Assign Notes to Sections")
-                        note_selector = gr.Dropdown(label="Select Note", choices=[], multiselect=True, allow_custom_value=True)
-                        section_selector = gr.Dropdown(label="Select Section", choices=[], value=None, allow_custom_value=True)
-                        assign_notes_btn = gr.Button("Assign Notes to Section", variant="primary")
-                        
-                        gr.Markdown("### Batch Organize")
-                        auto_organize_btn = gr.Button("Auto-Organize Notes", variant="secondary")
-                        customize_rules_btn = gr.Button("Customize Organization Rules", variant="secondary")
-                    with gr.Column(scale=1):
-                        gr.Markdown("### Content Editor")
-                        content_editor = gr.Textbox(label="Edit Content", lines=25, interactive=True, 
-                                                   placeholder="Select a note or content section to edit...")
-                        save_content_btn_org = gr.Button("Save Content", variant="primary")
-                        refresh_content_btn = gr.Button("Refresh Content", variant="secondary")
+                gr.Markdown("Follow these steps to organize your content:")
+                gr.Markdown("1. **Organize Content:** Click the 'Organize Content' button to automatically cluster your content and get organization suggestions.")
+                gr.Markdown("2. **Review Suggestions:** Review the suggestions for content gaps and reorganization. You can then apply or dismiss these suggestions.")
+                gr.Markdown("3. **Visualize Structure:** Generate a visualization of your content structure to better understand the relationships between your content.")
+
+                with gr.Tabs():
+                    with gr.TabItem("Step 1: Organize Content"):
+                        gr.Markdown("### Organize Your Content")
+                        content_ids_input = gr.Textbox(label="Content IDs", placeholder="Enter a comma-separated list of content IDs to organize", lines=1)
+                        organize_content_btn = gr.Button("Organize Content", variant="primary")
+                        organization_summary_output = gr.JSON(label="Organization Summary")
+
+                    with gr.TabItem("Step 2: Review Suggestions"):
+                        gr.Markdown("### Review Organization Suggestions")
+                        get_suggestions_btn = gr.Button("Get Suggestions", variant="primary")
+                        suggestions_output = gr.JSON(label="Organization Suggestions")
+
+                    with gr.TabItem("Step 3: Visualize Structure"):
+                        gr.Markdown("### Visualize Content Structure")
+                        visualize_content_btn = gr.Button("Visualize Content", variant="primary")
+                        visualization_output = gr.Image(label="Content Structure Visualization")
 
             with gr.TabItem("📚 Outline & Assembly"):
                 gr.Markdown("## Book Outline and Export")
@@ -521,11 +1090,158 @@ def create_ui():
                         export_btn = gr.Button("Build and Export Book", variant="primary")
                         exported_file_output = gr.File(label="Download Your Book")
                         
+            with gr.TabItem("📊 Progress & Gamification"):
+                gr.Markdown("## Writing Progress & Recommendations")
+                with gr.Row():
+                    with gr.Column():
+                        progress_summary = gr.Markdown(label="Progress Summary")
+                        progress_by_part = gr.JSON(label="Progress by Part")
+                        
+                        # Button to get progress and recommendations
+                        get_progress_btn = gr.Button("Refresh Progress & Recommendations", variant="primary")
+                        progress_output = gr.JSON(label="Detailed Progress")
+                        recommendations_output = gr.Textbox(label="Recommendations", lines=10)
+                        
+                        def update_progress(app_state):
+                            if not app_state:
+                                gr.Warning("Please load a project first.")
+                                return "", {}, {}, ""
+                            try:
+                                progress_data = app_state.get_writing_progress()
+                                recommendations_data = app_state.get_gamification_recommendations()
+                                
+                                # Ensure both data structures exist and are properly formatted
+                                if not progress_data:
+                                    return "Could not retrieve progress data.", {}, {}, ""
+
+                                if not recommendations_data:
+                                    return "Could not retrieve recommendations.", {}, {}, ""
+
+                                # Format progress summary - with additional safety checks
+                                total_target_pages = progress_data.get('total_target_pages', 0) or 0
+                                total_written_pages = progress_data.get('total_written_pages', 0) or 0
+                                progress_percentage = progress_data.get('progress_percentage', 0) or 0
+                                total_notes = progress_data.get('total_notes', 0) or 0
+                                
+                                progress_text = f"""
+                                ### Writing Progress
+                                - **Target Pages**: {total_target_pages}
+                                - **Written Pages**: {total_written_pages:.1f}
+                                - **Progress**: {progress_percentage:.1f}%
+                                - **Total Notes**: {total_notes}
+                                
+                                ### Milestones
+                                """
+                                
+                                # Ensure milestones is a list to prevent NoneType error
+                                milestones = recommendations_data.get('milestones', [])
+                                if milestones is None:
+                                    milestones = []
+                                
+                                for milestone in milestones:
+                                    if milestone:  # Additional safety check
+                                        progress_text += f"- {milestone}\n"
+                                
+                                # Format progress by part
+                                progress_by_part_data = {}
+                                progress_by_section = progress_data.get('progress_by_section', [])
+                                if progress_by_section is None:
+                                    progress_by_section = []
+                                
+                                for part in progress_by_section:
+                                    if not part:
+                                        # When part is empty, use default values
+                                        title = 'Untitled'
+                                        part_progress = 0
+                                        progress_by_part_data[title] = {
+                                            'written': "0.0",
+                                            'target': "0.0",
+                                            'percentage': f"{part_progress:.1f}%"
+                                        }
+                                        continue
+                                        
+                                    # Extract values with additional safety checks
+                                    written_pages = part.get('written_pages', 0) or 0
+                                    target_pages = part.get('target_pages', 0) or 1  # Default to 1 to prevent division by zero
+                                    title = part.get('title', 'Untitled') or 'Untitled'
+                                    
+                                    part_progress = (written_pages / target_pages * 100) if target_pages > 0 else 0
+                                    progress_by_part_data[title] = {
+                                        'written': f"{written_pages:.1f}",
+                                        'target': f"{target_pages:.1f}",
+                                        'percentage': f"{part_progress:.1f}%"
+                                    }
+                                
+                                # Ensure recommendations is a list to prevent NoneType error when calling join()
+                                recommendations_list = recommendations_data.get('recommendations', [])
+                                if recommendations_list is None:
+                                    recommendations_list = []
+                                
+                                # Filter out None values from recommendations list
+                                recommendations_list = [rec for rec in recommendations_list if rec is not None]
+                                
+                                recommendations_text = "\n".join(recommendations_list)
+                                
+                                return progress_text, progress_by_part_data, progress_data, recommendations_text
+                            except Exception as e:
+                                gr.Error(f"Failed to get progress: {e}")
+                                return f"Error getting progress: {e}", {}, {}, ""
+                        
+                        get_progress_btn.click(
+                            fn=update_progress,
+                            inputs=[app_state],
+                            outputs=[progress_summary, progress_by_part, progress_output, recommendations_output]
+                        )
+                        
         # --- Event Wiring ---
         load_project_btn.click(
             fn=create_or_load_project,
-            inputs=[project_path_input],
+            inputs=[project_path_input, book_title_input, target_pages_input],
             outputs=[app_state, project_path_display, outline_display]
+        )
+
+        def organize_content_ui(app_state, content_ids_str):
+            if not app_state:
+                gr.Warning("Please load a project first.")
+                return None
+            if not content_ids_str:
+                gr.Warning("Please enter content IDs.")
+                return None
+            content_ids = [c.strip() for c in content_ids_str.split(',')]
+            summary = app_state.organize_content(content_ids)
+            return summary
+
+        def get_suggestions_ui(app_state):
+            if not app_state:
+                gr.Warning("Please load a project first.")
+                return None
+            suggestions = app_state.get_organization_suggestions()
+            return suggestions
+
+        def visualize_content_ui(app_state):
+            if not app_state:
+                gr.Warning("Please load a project first.")
+                return None
+            output_path = app_state.project_path / "visualizations" / "content_structure.png"
+            app_state.visualize_content_structure(output_path)
+            return str(output_path)
+
+        organize_content_btn.click(
+            fn=organize_content_ui,
+            inputs=[app_state, content_ids_input],
+            outputs=[organization_summary_output]
+        )
+
+        get_suggestions_btn.click(
+            fn=get_suggestions_ui,
+            inputs=[app_state],
+            outputs=[suggestions_output]
+        )
+
+        visualize_content_btn.click(
+            fn=visualize_content_ui,
+            inputs=[app_state],
+            outputs=[visualization_output]
         )
         
         add_note_btn.click(
@@ -546,76 +1262,6 @@ def create_ui():
             outputs=[app_state, exported_file_output]
         )
 
-        # Content Organization Tab Event Wiring
-        refresh_outline_btn.click(
-            fn=refresh_outline_tree,
-            inputs=[app_state],
-            outputs=[outline_tree]
-        )
-        
-        refresh_outline_btn.click(  # Also update the note selector when refreshing outline
-            fn=get_available_notes,
-            inputs=[app_state],
-            outputs=[note_selector]
-        )
-        
-        refresh_outline_btn.click(  # Also update the section selector when refreshing outline
-            fn=get_outline_sections,
-            inputs=[app_state],
-            outputs=[section_selector]
-        )
-        
-        assign_notes_btn.click(
-            fn=assign_notes_to_section,
-            inputs=[app_state, note_selector, section_selector],
-            outputs=[outline_tree]  # Update display after assignment
-        )
-        
-        # Add event for loading note content into editor when a note is selected
-        def load_selected_note_content(app_state, selected_notes):
-            """Load the content of the first selected note into the editor."""
-            if not selected_notes:
-                return "", ""
-            
-            # Extract note ID from the selection (format: "note_id: preview text")
-            note_selection = selected_notes[0]  # Use first selected note
-            note_id = note_selection.split(":")[0] if ":" in note_selection else note_selection
-            
-            # Load the note content
-            results = app_state.note_processor.notes_collection.get(
-                ids=[note_id],
-                include=["documents", "metadatas"]
-            )
-            
-            if results["ids"]:
-                content = results["documents"][0]
-                return content, note_id  # Return content and note_id
-            else:
-                return "Note not found.", ""
-        
-        note_selector.change(
-            fn=load_selected_note_content,
-            inputs=[app_state, note_selector],
-            outputs=[content_editor, current_content_id_state]
-        )
-        
-        auto_organize_btn.click(
-            fn=auto_organize_notes,
-            inputs=[app_state],
-            outputs=[outline_tree]  # Update display after auto-organization
-        )
-        
-        customize_rules_btn.click(
-            fn=customize_organization_rules,
-            inputs=[app_state],
-            outputs=[outline_tree]  # For now, just update display with status
-        )
-        
-        save_content_btn_org.click(
-            fn=save_content_from_editor,
-            inputs=[app_state, current_content_id_state, content_editor],
-            outputs=None
-        )
         
         # Note that we can't directly use a textbox with fixed value in Gradio events
         # Instead, we'll handle this differently in actual implementation

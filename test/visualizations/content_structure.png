@@ -1,0 +1,40 @@
+// Content Structure
+digraph content_structure {
+	rankdir=TB splines=ortho
+	subgraph cluster_outline {
+		color=lightgrey label=Outline style=filled
+		"734558c1-f6f2-4a5f-9a3f-615f1d091768" [label="What is Hacking?" shape=box]
+		"3d75ae2e-52f4-4dfa-bc55-6d6b1a25c0ce" [label="Basic Concepts" shape=ellipse]
+		"734558c1-f6f2-4a5f-9a3f-615f1d091768" -> "3d75ae2e-52f4-4dfa-bc55-6d6b1a25c0ce"
+		"27080212-126c-45fb-9a6a-004430186084" [label=Terminology shape=ellipse]
+		"734558c1-f6f2-4a5f-9a3f-615f1d091768" -> "27080212-126c-45fb-9a6a-004430186084"
+		"043f407a-e5fe-4f23-ad8c-f518189456b2" [label="History of Hacking" shape=box]
+		"cc58adff-dda6-4a23-aa14-f5b2e9ca96ff" [label="Early Developments" shape=ellipse]
+		"043f407a-e5fe-4f23-ad8c-f518189456b2" -> "cc58adff-dda6-4a23-aa14-f5b2e9ca96ff"
+		"a1d98cbe-5392-431a-ac47-d2c72034cdae" [label="Modern Evolution" shape=ellipse]
+		"043f407a-e5fe-4f23-ad8c-f518189456b2" -> "a1d98cbe-5392-431a-ac47-d2c72034cdae"
+		"acfcaa0b-2702-4bfc-9edb-07e3d833155e" [label="Key Principles" shape=box]
+		"f7a54f3d-643f-4a5c-bb5f-a12c988a523f" [label="Core Principles" shape=ellipse]
+		"acfcaa0b-2702-4bfc-9edb-07e3d833155e" -> "f7a54f3d-643f-4a5c-bb5f-a12c988a523f"
+		"6188f92d-c5a3-45a1-808e-5b53ff7c1eb9" [label="Secondary Principles" shape=ellipse]
+		"acfcaa0b-2702-4bfc-9edb-07e3d833155e" -> "6188f92d-c5a3-45a1-808e-5b53ff7c1eb9"
+		"6920968a-6a29-4656-9b31-624e7ab28931" [label="Common Applications" shape=box]
+		"7929cb18-14e1-4962-ad7b-d5592bb52084" [label="Common Use Cases" shape=ellipse]
+		"6920968a-6a29-4656-9b31-624e7ab28931" -> "7929cb18-14e1-4962-ad7b-d5592bb52084"
+		"ef44c7f0-0f7e-4a6b-9d43-92839ef69c33" [label="Industry Applications" shape=ellipse]
+		"6920968a-6a29-4656-9b31-624e7ab28931" -> "ef44c7f0-0f7e-4a6b-9d43-92839ef69c33"
+		"b900f2cd-09d2-41fb-9ab5-88ebb1d2a957" [label="Advanced Techniques" shape=box]
+		"e7b28868-1fba-412f-a3d3-efbf5da9508f" [label="Advanced Methods" shape=ellipse]
+		"b900f2cd-09d2-41fb-9ab5-88ebb1d2a957" -> "e7b28868-1fba-412f-a3d3-efbf5da9508f"
+		"b1452e5e-1976-4266-9148-df7e0dfaad5e" [label="Expert Techniques" shape=ellipse]
+		"b900f2cd-09d2-41fb-9ab5-88ebb1d2a957" -> "b1452e5e-1976-4266-9148-df7e0dfaad5e"
+		"437d8d70-b82a-4fd9-ac68-d5d56380861e" [label="Future of Hacking" shape=box]
+		"de8e7216-68f3-4bb9-a8fe-52bfc1757173" [label="Emerging Trends" shape=ellipse]
+		"437d8d70-b82a-4fd9-ac68-d5d56380861e" -> "de8e7216-68f3-4bb9-a8fe-52bfc1757173"
+		"27051355-8262-4425-9ddb-600df69e2d7b" [label="Future Challenges" shape=ellipse]
+		"437d8d70-b82a-4fd9-ac68-d5d56380861e" -> "27051355-8262-4425-9ddb-600df69e2d7b"
+	}
+	subgraph cluster_clusters {
+		color=lightblue label="Content Clusters" style=filled
+	}
+}

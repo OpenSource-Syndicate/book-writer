@@ -6,7 +6,7 @@ models:
     max_tokens: 1024
     top_p: 0.9
   outline_generation:
-    model_name: deepseek-r1:8b
+    model_name: phi3.5:latest
     api_type: ollama
     temperature: 0.5
     max_tokens: 512

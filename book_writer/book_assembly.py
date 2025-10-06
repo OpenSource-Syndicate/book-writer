@@ -199,6 +199,210 @@ class ContentProcessor(ContentProcessor):
         return context
 
 
+class ContentFlowOptimizer(ContentProcessor):
+    """
+    Optimizes content flow within chapters and subtopics based on semantic similarity and coherence.
+    """
+    
+    def __init__(self, content_manager: ContentManager):
+        self.content_manager = content_manager
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.metrics.pairwise import cosine_similarity
+        self.vectorizer = TfidfVectorizer(stop_words='english', lowercase=True)
+        self.cosine_similarity = cosine_similarity
+    
+    def process(self, context: AssemblyContext) -> AssemblyContext:
+        """
+        Optimize content flow by reordering content items for better coherence.
+        """
+        print("Optimizing content flow...")
+        
+        # For each part, chapter, and subtopic, optimize the content order
+        optimized_content = []
+        content_idx = 0
+        
+        for part_index, part in enumerate(context.outline.parts, 1):
+            # Add part header
+            if f"# Part {part_index}: {part['title']}" in context.content[content_idx]:
+                optimized_content.append(context.content[content_idx])
+                content_idx += 1
+            
+            # Add part description if present
+            if context.config.include_part_descriptions and part.get('description'):
+                if f"*{part['description']}*" in context.content[content_idx]:
+                    optimized_content.append(context.content[content_idx])
+                    content_idx += 1
+            
+            for chapter_index, chapter in enumerate(part['chapters'], 1):
+                # Add chapter header
+                if f"## Chapter {part_index}.{chapter_index}: {chapter['title']}" in context.content[content_idx]:
+                    optimized_content.append(context.content[content_idx])
+                    content_idx += 1
+                
+                # Add chapter description if present
+                if context.config.include_chapter_descriptions and chapter.get('description'):
+                    if f"*{chapter['description']}*" in context.content[content_idx]:
+                        optimized_content.append(context.content[content_idx])
+                        content_idx += 1
+                
+                for subtopic in chapter['subtopics']:
+                    # Add subtopic header
+                    if f"### {subtopic['title']}" in context.content[content_idx]:
+                        optimized_content.append(context.content[content_idx])
+                        content_idx += 1
+                    
+                    # Add subtopic description if present
+                    if context.config.include_subtopic_descriptions and subtopic.get('description'):
+                        if f"*{subtopic['description']}*" in context.content[content_idx]:
+                            optimized_content.append(context.content[content_idx])
+                            content_idx += 1
+                    
+                    # Find content for this subtopic and optimize its order
+                    subtopic_content_start = content_idx
+                    subtopic_content = []
+                    
+                    # Extract content for this subtopic until we hit the next section
+                    while (content_idx < len(context.content) and 
+                           not context.content[content_idx].startswith('#') and
+                           not context.content[content_idx].startswith('*No content available') and
+                           not context.content[content_idx].startswith('*Error retrieving')):
+                        line = context.content[content_idx]
+                        if line.strip() != "":
+                            subtopic_content.append((content_idx, line))
+                        content_idx += 1
+                    
+                    # Optimize the order of content in this subtopic
+                    if len(subtopic_content) > 1:
+                        # Extract just the content text for optimization
+                        content_texts = [item[1] for item in subtopic_content]
+                        
+                        # Optimize content order for better flow
+                        optimized_indices = self._optimize_content_order(content_texts)
+                        
+                        # Add the optimized content
+                        for opt_idx in optimized_indices:
+                            optimized_content.append(subtopic_content[opt_idx][1])
+                    else:
+                        # If no optimization needed, just add the content as is
+                        for _, content_line in subtopic_content:
+                            optimized_content.append(content_line)
+                    
+                    # Add the content back to the optimized content list
+                    while (content_idx < len(context.content) and 
+                           context.content[content_idx].startswith('*No content available') or
+                           context.content[content_idx].startswith('*Error retrieving') or
+                           context.content[content_idx].startswith('\n---')):
+                        optimized_content.append(context.content[content_idx])
+                        content_idx += 1
+                
+                # Skip the separator if we just added it from the original content
+                if (content_idx < len(context.content) and 
+                    context.content[content_idx].startswith('\n---')):
+                    content_idx += 1
+        
+        # Replace the context content with the optimized version
+        context.content = optimized_content
+        
+        return context
+    
+    def _optimize_content_order(self, content_items: List[str]) -> List[int]:
+        """
+        Optimize the order of content items for better flow and coherence.
+        
+        Args:
+            content_items: List of content strings
+            
+        Returns:
+            List of indices in optimized order
+        """
+        if len(content_items) <= 1:
+            return list(range(len(content_items)))
+        
+        # Create TF-IDF vectors for content items
+        try:
+            tfidf_matrix = self.vectorizer.fit_transform(content_items)
+            
+            # Calculate similarity matrix
+            similarity_matrix = self.cosine_similarity(tfidf_matrix)
+            
+            # Use a greedy algorithm to order content for maximum coherence
+            n_items = len(content_items)
+            unvisited = set(range(n_items))
+            order = []
+            
+            # Start with the first item
+            current = 0
+            order.append(current)
+            unvisited.remove(current)
+            
+            # Greedily select the next most similar item
+            while unvisited:
+                best_next = -1
+                best_similarity = -2  # Cosine similarity ranges from -1 to 1
+                
+                for candidate in unvisited:
+                    sim = similarity_matrix[current, candidate]
+                    if sim > best_similarity:
+                        best_similarity = sim
+                        best_next = candidate
+                
+                if best_next != -1:
+                    current = best_next
+                    order.append(current)
+                    unvisited.remove(current)
+                else:
+                    # If no similar items found, just pick one randomly
+                    current = unvisited.pop()
+                    order.append(current)
+            
+            return order
+        except Exception:
+            # Fallback to original order if optimization fails
+            return list(range(len(content_items)))
+
+
+class ContentGapDetector(ContentProcessor):
+    """
+    Detects content gaps in the outline and suggests areas that need more content.
+    """
+    
+    def __init__(self, content_manager: ContentManager):
+        self.content_manager = content_manager
+    
+    def process(self, context: AssemblyContext) -> AssemblyContext:
+        """
+        Detect content gaps and add notes about missing content.
+        """
+        print("Detecting content gaps...")
+        
+        gap_report = []
+        total_subtopics = 0
+        empty_subtopics = 0
+        
+        for part in context.outline.parts:
+            for chapter in part['chapters']:
+                for subtopic in chapter['subtopics']:
+                    total_subtopics += 1
+                    subtopic_content = self.content_manager.retrieve_content_by_subtopic(subtopic['id'])
+                    if not subtopic_content:
+                        empty_subtopics += 1
+                        gap_report.append(f"- Missing content for: {part['title']} -> {chapter['title']} -> {subtopic['title']}")
+        
+        if gap_report:
+            gap_summary = [
+                "\n## Content Gap Report\n",
+                f"Total subtopics: {total_subtopics}\n",
+                f"Subtopics with no content: {empty_subtopics}\n",
+                f"Completion rate: {((total_subtopics - empty_subtopics) / total_subtopics * 100):.1f}%\n\n",
+                "Subtopics that need content:\n"
+            ] + gap_report + ["\n"]
+            
+            # Add gap report to the end of content
+            context.content.extend(gap_summary)
+        
+        return context
+
+
 class AssemblyPipeline:
     """
     Orchestrates the book assembly process by running processors in sequence.
@@ -209,7 +413,9 @@ class AssemblyPipeline:
         self.processors = processors or [
             TitleProcessor(),
             TOCProcessor(),
-            ContentProcessor(content_manager)
+            ContentProcessor(content_manager),
+            ContentFlowOptimizer(content_manager),  # Added for intelligent content flow
+            ContentGapDetector(content_manager)     # Added for gap detection
         ]
     
     def add_processor(self, processor: ContentProcessor, index: int = None):

@@ -7,10 +7,15 @@ import os
 import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Union
+import logging
 
 import yaml
 
 from book_writer.model_manager import model_manager
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class BookOutline:
@@ -31,6 +36,16 @@ class BookOutline:
         self.uuid = str(uuid.uuid4())
         self.created_at = None
         self.updated_at = None
+        # Additional metadata for enhanced organization
+        self.metadata = {
+            "topic_keywords": [],
+            "importance_weights": {},  # Per part/chapter/subtopic
+            "prerequisites": {},       # Content that should come before
+            "dependencies": {},        # Content that depends on this
+            "relationships": {},       # Relationships between content elements
+            "suggested_reading_order": [],
+            "content_progression": {}  # How content builds on previous concepts
+        }
     
     def add_part(self, title: str, description: str = "") -> Dict:
         """Add a new part to the book.
@@ -114,15 +129,17 @@ class BookOutline:
             "uuid": self.uuid,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
-            "parts": self.parts
+            "parts": self.parts,
+            "metadata": self.metadata
         }
     
-    def generate_from_topic(self, topic: str, style: str = "academic") -> None:
+    def generate_from_topic(self, topic: str, style: str = "academic", model_name: str = None) -> None:
         """Generate a complete book outline from a topic using AI.
         
         Args:
             topic: The topic for the book
             style: The style for the book (academic, narrative, technical, etc.)
+            model_name: The name of the model to use for generation
         """
         # Create a prompt for the AI to generate an outline
         prompt = f"""
@@ -161,14 +178,17 @@ class BookOutline:
         
         try:
             # Use the model manager with the organization model to generate the outline
+            logger.info(f"Generating outline for topic: {topic}")
             result = model_manager.generate_response(
                 prompt=prompt,
                 task="outline_generation",
+                model_name=model_name,
                 format_json=True,
-                temperature=0.5,
-                max_tokens=1024,
-                top_p=0.8
+                temperature=0.4,  # Lower temperature for more consistent output
+                max_tokens=800,   # Optimized token count for faster generation
+                top_p=0.7         # Adjusted for more focused generation
             )
+            logger.info(f"AI response: {result}")
             
             if isinstance(result, dict) and "parts" in result:
                 # Clear existing parts
@@ -257,6 +277,223 @@ class BookOutline:
         self.add_subtopic(chapter6["id"], f"Emerging Trends", f"Emerging trends in {topic}")
         self.add_subtopic(chapter6["id"], f"Future Challenges", f"Future challenges for {topic}")
     
+    def set_importance_weight(self, element_id: str, weight: float, element_type: str = "auto"):
+        """
+        Set importance weight for a specific element (part, chapter, or subtopic).
+        
+        Args:
+            element_id: ID of the element
+            weight: Importance weight (0.0 to 1.0)
+            element_type: Type of element ('part', 'chapter', 'subtopic', or 'auto')
+        """
+        element_type = element_type.lower()
+        
+        # If auto-detect, check across all levels
+        if element_type == "auto":
+            element_type = self._get_element_type(element_id)
+        
+        if element_type and element_type in ["part", "chapter", "subtopic"]:
+            self.metadata["importance_weights"][element_id] = max(0.0, min(1.0, weight))
+    
+    def get_importance_weight(self, element_id: str) -> float:
+        """
+        Get importance weight for a specific element.
+        
+        Args:
+            element_id: ID of the element
+            
+        Returns:
+            Importance weight (0.0 to 1.0)
+        """
+        return self.metadata["importance_weights"].get(element_id, 0.5)  # Default to 0.5
+    
+    def _get_element_type(self, element_id: str) -> Optional[str]:
+        """
+        Helper method to determine the type of an element by its ID.
+        
+        Args:
+            element_id: The ID to check
+            
+        Returns:
+            The type of element ('part', 'chapter', 'subtopic') or None if not found
+        """
+        for part in self.parts:
+            if part["id"] == element_id:
+                return "part"
+            for chapter in part["chapters"]:
+                if chapter["id"] == element_id:
+                    return "chapter"
+                for subtopic in chapter["subtopics"]:
+                    if subtopic["id"] == element_id:
+                        return "subtopic"
+        return None
+    
+    def add_topic_keywords(self, keywords: List[str]):
+        """
+        Add topic keywords to the outline metadata.
+        
+        Args:
+            keywords: List of topic keywords
+        """
+        for keyword in keywords:
+            if keyword not in self.metadata["topic_keywords"]:
+                self.metadata["topic_keywords"].append(keyword)
+    
+    def add_relationship(self, source_id: str, target_id: str, relationship_type: str, strength: float = 1.0):
+        """
+        Add a relationship between two elements in the outline.
+        
+        Args:
+            source_id: ID of the source element
+            target_id: ID of the target element
+            relationship_type: Type of relationship (e.g., 'prerequisite', 'sequential', 'complementary')
+            strength: Strength of the relationship (0.0 to 1.0)
+        """
+        if source_id not in self.metadata["relationships"]:
+            self.metadata["relationships"][source_id] = []
+        
+        # Check if relationship already exists and update it
+        existing_idx = None
+        for i, rel in enumerate(self.metadata["relationships"][source_id]):
+            if rel["target_id"] == target_id and rel["type"] == relationship_type:
+                existing_idx = i
+                break
+        
+        new_relationship = {
+            "target_id": target_id,
+            "type": relationship_type,
+            "strength": max(0.0, min(1.0, strength))
+        }
+        
+        if existing_idx is not None:
+            self.metadata["relationships"][source_id][existing_idx] = new_relationship
+        else:
+            self.metadata["relationships"][source_id].append(new_relationship)
+    
+    def get_related_elements(self, element_id: str, relationship_type: Optional[str] = None) -> List[Dict]:
+        """
+        Get elements related to the specified element.
+        
+        Args:
+            element_id: ID of the element
+            relationship_type: Optional filter for specific relationship type
+            
+        Returns:
+            List of related elements with relationship information
+        """
+        related = []
+        
+        # Check for relationships where this element is the source
+        if element_id in self.metadata["relationships"]:
+            for rel in self.metadata["relationships"][element_id]:
+                if relationship_type is None or rel["type"] == relationship_type:
+                    related.append(rel)
+        
+        # Check for relationships where this element is the target
+        for source_id, relationships in self.metadata["relationships"].items():
+            for rel in relationships:
+                if rel["target_id"] == element_id and (relationship_type is None or rel["type"] == relationship_type):
+                    related.append({
+                        "target_id": source_id,
+                        "type": rel["type"],
+                        "strength": rel["strength"],
+                        "direction": "reverse"
+                    })
+        
+        return related
+    
+    def get_prerequisites(self, element_id: str) -> List[str]:
+        """
+        Get prerequisite elements for the specified element.
+        
+        Args:
+            element_id: ID of the element
+            
+        Returns:
+            List of prerequisite element IDs
+        """
+        prerequisites = []
+        for source_id, relationships in self.metadata["relationships"].items():
+            for rel in relationships:
+                if rel["target_id"] == element_id and rel["type"] == "prerequisite":
+                    prerequisites.append(source_id)
+        return prerequisites
+    
+    def validate_content_progression(self) -> List[Dict]:
+        """
+        Validate that content follows logical progression based on prerequisites.
+        
+        Returns:
+            List of validation issues found
+        """
+        issues = []
+        
+        # Check prerequisites for each element
+        for part in self.parts:
+            for chapter in part["chapters"]:
+                for subtopic in chapter["subtopics"]:
+                    # Check if prerequisites have been satisfied
+                    prereqs = self.get_prerequisites(subtopic["id"])
+                    for prereq_id in prereqs:
+                        if not self._is_prereq_satisfied(prereq_id, subtopic["id"]):
+                            issues.append({
+                                "element_id": subtopic["id"],
+                                "element_title": subtopic["title"],
+                                "prereq_id": prereq_id,
+                                "issue": "Prerequisite not properly positioned before this element"
+                            })
+        
+        return issues
+    
+    def _is_prereq_satisfied(self, prereq_id: str, target_id: str) -> bool:
+        """
+        Check if a prerequisite element appears before the target element in the outline.
+        
+        Args:
+            prereq_id: ID of the prerequisite element
+            target_id: ID of the target element
+            
+        Returns:
+            True if prerequisite is satisfied, False otherwise
+        """
+        # Find positions of both elements in the outline
+        prereq_position = self._get_element_position(prereq_id)
+        target_position = self._get_element_position(target_id)
+        
+        if prereq_position is None or target_position is None:
+            return False  # Can't determine positions
+        
+        # Check if prerequisite comes before target
+        return prereq_position < target_position
+    
+    def _get_element_position(self, element_id: str) -> Optional[int]:
+        """
+        Get the position of an element in the outline hierarchy.
+        
+        Args:
+            element_id: ID of the element
+            
+        Returns:
+            Position value or None if not found
+        """
+        position = 0
+        for part_idx, part in enumerate(self.parts):
+            if part["id"] == element_id:
+                return position
+            position += 1
+            
+            for chapter_idx, chapter in enumerate(part["chapters"]):
+                if chapter["id"] == element_id:
+                    return position
+                position += 1
+                
+                for subtopic_idx, subtopic in enumerate(chapter["subtopics"]):
+                    if subtopic["id"] == element_id:
+                        return position
+                    position += 1
+        
+        return None
+    
     @classmethod
     def from_dict(cls, data: Dict) -> "BookOutline":
         """Create an outline from a dictionary.
@@ -272,6 +509,15 @@ class BookOutline:
         outline.created_at = data.get("created_at")
         outline.updated_at = data.get("updated_at")
         outline.parts = data.get("parts", [])
+        outline.metadata = data.get("metadata", {
+            "topic_keywords": [],
+            "importance_weights": {},
+            "prerequisites": {},
+            "dependencies": {},
+            "relationships": {},
+            "suggested_reading_order": [],
+            "content_progression": {}
+        })
         return outline
     
     def save(self, file_path: Union[str, Path], format: str = "yaml") -> None:
@@ -386,16 +632,36 @@ class OutlineManager:
         return [f.name for f in self.outlines_dir.glob("*.yaml")] + [f.name for f in self.outlines_dir.glob("*.json")]
 
 
-def create_sample_outline(topic: str = "Artificial Intelligence") -> BookOutline:
+def create_sample_outline(topic: str = "Artificial Intelligence", title: str = None) -> BookOutline:
     """Create a sample book outline using AI.
     
     Args:
         topic: The topic for the sample outline (default: "Artificial Intelligence")
+        title: The title for the book (if provided, overrides the default format)
     
     Returns:
         A sample BookOutline instance
     """
-    outline = BookOutline(f"Understanding {topic}", "AI Assistant", f"An AI-generated guide to {topic}")
-    outline.generate_from_topic(topic, style="academic")
+    # Use provided title or default format
+    book_title = title if title is not None else f"Understanding {topic}"
+    description = f"An AI-generated guide to {topic}"
     
+    outline = BookOutline(book_title, "AI Assistant", description)
+    
+    try:
+        # Try with the phi3.5 model first (as specified in config)
+        outline.generate_from_topic(topic, style="academic")
+        if not outline.parts:
+            # If the primary model fails, try with the secondary model
+            logger.warning("Primary model failed to generate outline, trying secondary model.")
+            outline.generate_from_topic(topic, style="academic", model_name="stable-beluga:13b")
+    except Exception as e:
+        logger.error(f"Error generating outline: {e}")
+
+    if not outline.parts:
+        # If both models fail, create a fallback outline
+        logger.error("All models failed to generate outline, creating a fallback outline.")
+        outline._create_fallback_outline(f"{topic} (AI Generation Failed)")
+        outline.description = "This is a template outline. AI generation failed. Please fill in the details."
+
     return outline

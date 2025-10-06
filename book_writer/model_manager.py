@@ -26,6 +26,7 @@ class OllamaModelManager:
         prompt: str, 
         task: str, 
         system_prompt: Optional[str] = None,
+        model_name: Optional[str] = None,
         format_json: bool = False,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
@@ -38,6 +39,7 @@ class OllamaModelManager:
             prompt: The input prompt
             task: The task type (determines which model to use)
             system_prompt: Optional system prompt to guide the model
+            model_name: Optional model name to override the task's default model
             format_json: Whether to request JSON output
             temperature: Temperature setting (overrides config if provided)
             max_tokens: Max tokens setting (overrides config if provided)
@@ -51,7 +53,7 @@ class OllamaModelManager:
         model_cfg = self.config.get_model_config(task)
         
         # Use provided parameters or fall back to config
-        model_name = model_cfg["model_name"]
+        model_name = model_name or model_cfg["model_name"]
         temp = temperature or model_cfg.get("temperature", 0.7)
         max_tok = max_tokens or model_cfg.get("max_tokens", 1024)
         top_p_val = top_p or model_cfg.get("top_p", 0.9)
@@ -93,11 +95,18 @@ class OllamaModelManager:
             request_params["tools"] = functions
             
         try:
+            print(f"Making API call to Ollama with model: {model_name}")
+            print(f"Request params: {request_params}")
+            
             # Make the API call
             response = self.ollama_client.chat(**request_params)
             
+            print(f"Received response from Ollama: {response}")
+            
             # Extract content from response
             content = response["message"]["content"]
+            
+            print(f"Extracted content: {content[:100]}...")
             
             # If JSON format was requested, parse the response
             if format_json or functions:
@@ -110,14 +119,22 @@ class OllamaModelManager:
                         content = content[:-3]  # Remove ```
                     content = content.strip()
                     
-                    return json.loads(content)
-                except json.JSONDecodeError:
+                    print(f"Parsing JSON content: {content[:100]}...")
+                    parsed_content = json.loads(content)
+                    print(f"Parsed JSON successfully: {parsed_content}")
+                    return parsed_content
+                except json.JSONDecodeError as je:
+                    error_msg = f"JSON decoding error: {je}. Content was: {content}"
+                    print(error_msg)
                     # If JSON parsing fails, return as string
                     return content
             else:
                 return content
         except Exception as e:
-            print(f"Error generating response with model {model_name}: {e}")
+            error_msg = f"Error generating response with model {model_name}: {e}"
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
             return f"Error generating response: {str(e)}"
     
     def generate_response_stream(

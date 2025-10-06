@@ -10,6 +10,7 @@ The Book Writer System is a comprehensive book development application that help
 - **AI-Powered Content Expansion**: Expand raw notes into polished text using AI models
 - **Retrieval-Augmented Writing (RAG)**: Context-aware writing with Ollama models
 - **AI Function Calling & Tool Integration**: Support for AI models to call specific tools and functions
+- **Content Organization**: Cluster content, detect gaps, suggest reorganization, and visualize content structure
 - **Book Assembly**: Merge chapters according to outline and generate complete manuscripts
 - **Multiple Export Options**: Export to PDF and ePub formats
 - **Dual Interface**: Interactive CLI and web-based Gradio UI
@@ -26,6 +27,7 @@ The system follows a modular architecture with clear separation of concerns:
 - **book_assembly.py**: Combines content into complete manuscripts
 - **export.py**: Handles PDF and ePub export functionality
 - **model_manager.py**: Manages different Ollama models for various tasks
+- **organized_content.py**: Provides tools for content organization, including the `ContentOrganizer` and `ContentOrganization` classes.
 - **ui.py**: Gradio web interface implementation
 - **tool_registry.py**: Manages AI tool integration for function calling
 
@@ -89,6 +91,9 @@ The system implements real-time streaming of Ollama output to the web UI. The `e
 - `create_outline <title> [author] [description]`: Create a new book outline
 - `add_note <text> [source] [topic1,topic2,...]`: Add a new note to the system
 - `expand_note <note_id> [style]`: Expand a note into polished text
+- `organize_content <content_id1> <content_id2> ...`: Organize content and get a summary
+- `get_suggestions`: Get suggestions for content gaps and reorganization
+- `visualize_content <output_path>`: Generate a visualization of the content structure
 - `build_book`: Build the current book according to the outline
 - `export_book <format>`: Export the book to PDF or ePub format
 
@@ -97,5 +102,9 @@ The system implements real-time streaming of Ollama output to the web UI. The `e
 - Note adding with real-time AI expansion
 - Writing style selection (academic, narrative, technical, conversational)
 - Content editing capabilities
+- Simplified content organization with a step-by-step process:
+    - Organize content and get a summary
+    - Review organization suggestions
+    - Visualize content structure
 - Outline visualization and management
 - Book building and export functionality

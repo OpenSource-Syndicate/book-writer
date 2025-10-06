@@ -49,6 +49,13 @@ class NoteProcessor:
             name="content",
             metadata={"description": "Expanded content chunks"}
         )
+
+    def close(self):
+        """Close the ChromaDB client."""
+        # ChromaDB PersistentClient doesn't have a direct close method
+        # Resources will be properly cleaned up when the object is garbage collected
+        # If clearing all data is needed, self.client.reset() can be used instead of close
+        pass
     
     def process_note(self, 
                      text: str, 
@@ -398,3 +405,37 @@ class ContentManager:
             })
         
         return formatted_results
+    
+    def get_all_content(self) -> Dict[str, Dict]:
+        """Retrieve all content from the content collection.
+        
+        Returns:
+            A dictionary of all content items with their IDs as keys and content data as values
+        """
+        # Get all content from ChromaDB
+        results = self.note_processor.content_collection.get(
+            include=["documents", "metadatas"]
+        )
+        
+        # Format results as a dictionary with content IDs as keys
+        all_content = {}
+        
+        # Safely extract the ids, documents, and metadatas, providing empty lists as defaults
+        ids = results.get("ids", [])
+        documents = results.get("documents", [])
+        metadatas = results.get("metadatas", [])
+        
+        if ids:
+            for i in range(len(ids)):
+                content_id = ids[i]
+                
+                # Safely get document and metadata, with empty string and empty dict as defaults
+                document = documents[i] if i < len(documents) else ""
+                metadata = metadatas[i] if i < len(metadatas) else {}
+                
+                all_content[content_id] = {
+                    "content": document,
+                    "metadata": metadata
+                }
+        
+        return all_content

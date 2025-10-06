@@ -8,3 +8,10 @@ wheels/
 
 # Virtual environments
 .venv
+
+.venv/
+.semindex/
+.pytest_cache/
+.gradio/
+db/chroma.sqlite3
+test/
