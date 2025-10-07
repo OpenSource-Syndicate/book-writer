@@ -4,6 +4,7 @@ Provides drag-and-drop-like interface for organizing notes into outline structur
 """
 import gradio as gr
 import json
+import time
 from typing import List, Dict, Optional, Tuple
 
 
@@ -334,15 +335,31 @@ def format_outline_as_interactive_tree(app_state) -> str:
             const chapterId = e.currentTarget.dataset.chapterId;
             const subtopicId = e.currentTarget.dataset.subtopicId;
             
-            // Send assignment to backend
-            console.log('Assigning note', noteId, 'to', chapterId, subtopicId);
-            
-            // You would trigger a Gradio event here to update the backend
-            // For now, we'll just show a visual confirmation
-            e.currentTarget.style.background = '#c8e6c9';
-            setTimeout(() => {
-                e.currentTarget.style.background = 'white';
-            }, 500);
+            // Bridge payload to Gradio via hidden components
+            try {
+                const payload = JSON.stringify({ note_id: noteId, chapter_id: chapterId, subtopic_id: subtopicId });
+                const inputContainer = document.getElementById('drop_receiver');
+                const btnContainer = document.getElementById('drop_apply');
+                // Find actual input and button elements inside containers
+                const inputEl = inputContainer ? (inputContainer.querySelector('textarea, input') || inputContainer) : null;
+                const btnEl = btnContainer ? (btnContainer.querySelector('button') || btnContainer) : null;
+                if (inputEl && btnEl) {
+                    // Set value and dispatch input event so Gradio picks up the change
+                    inputEl.value = payload;
+                    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+                    // Visual feedback
+                    e.currentTarget.style.background = '#c8e6c9';
+                    // Trigger backend assignment
+                    btnEl.click();
+                    setTimeout(() => {
+                        e.currentTarget.style.background = 'white';
+                    }, 600);
+                } else {
+                    console.warn('Drop bridge elements not found.');
+                }
+            } catch (err) {
+                console.error('Failed to send drop payload:', err);
+            }
         }
     </script>
     """
@@ -373,7 +390,7 @@ def assign_note_to_section(app_state, note_id: str, chapter_id: str, subtopic_id
         metadata["chapter_id"] = chapter_id
         metadata["subtopic_id"] = subtopic_id
         metadata["organized_by"] = "manual_drag_drop"
-        metadata["organized_date"] = str(gr.utils.get_time())
+        metadata["organized_date"] = str(time.time())
         
         # Filter out None values
         filtered_metadata = {k: v for k, v in metadata.items() if v is not None}
@@ -441,6 +458,18 @@ def create_organizer_tab(app_state_component):
                 
                 # Notes list (HTML display)
                 notes_display = gr.HTML(label="Notes")
+
+                # Hidden bridge elements for JS-driven drops
+                drop_receiver = gr.Textbox(
+                    label="drop_payload",
+                    visible=False,
+                    elem_id="drop_receiver"
+                )
+                drop_apply_btn = gr.Button(
+                    "Apply Drop",
+                    visible=False,
+                    elem_id="drop_apply"
+                )
                 
                 # Manual assignment controls (fallback if drag-drop doesn't work)
                 gr.Markdown("### Manual Assignment")
@@ -495,21 +524,38 @@ def create_organizer_tab(app_state_component):
             notes_html = refresh_notes_handler(app_state, "", True, True)
             outline_html = refresh_outline_handler(app_state)
             return msg, notes_html, outline_html
+
+        def assign_from_drop(app_state, payload_json):
+            """Handle drop payload coming from JS and assign the note."""
+            try:
+                payload = json.loads(payload_json or "{}")
+                note_id = payload.get("note_id")
+                chapter_id = payload.get("chapter_id")
+                subtopic_id = payload.get("subtopic_id")
+                if not (note_id and chapter_id and subtopic_id):
+                    return "Invalid drop payload.", refresh_notes_handler(app_state, "", True, True), refresh_outline_handler(app_state)
+                success, msg = assign_note_to_section(app_state, note_id, chapter_id, subtopic_id)
+                # Refresh displays after assignment
+                notes_html = refresh_notes_handler(app_state, "", True, True)
+                outline_html = refresh_outline_handler(app_state)
+                return msg, notes_html, outline_html
+            except Exception as e:
+                return f"Error handling drop: {e}", refresh_notes_handler(app_state, "", True, True), refresh_outline_handler(app_state)
         
         def auto_organize_handler(app_state):
             """Auto-organize all unassigned notes."""
             if not app_state:
-                return "No project loaded."
+                return "No project loaded.", refresh_notes_handler(app_state, "", True, True), refresh_outline_handler(app_state)
             
             if not app_state.current_outline:
-                return "No outline loaded."
+                return "No outline loaded.", refresh_notes_handler(app_state, "", True, True), refresh_outline_handler(app_state)
             
             try:
                 # Get all unassigned notes
                 all_notes = app_state.note_processor.notes_collection.get(include=["documents", "metadatas"])
                 all_note_ids = all_notes.get("ids", [])
                 if not all_note_ids:
-                    return "No notes to organize."
+                    return "No notes to organize.", refresh_notes_handler(app_state, "", True, True), refresh_outline_handler(app_state)
                 
                 organized_count = 0
                 skipped_count = 0
@@ -550,23 +596,20 @@ def create_organizer_tab(app_state_component):
                             error_count += 1
                     except Exception as e:
                         error_count += 1
-                        print(f"Error organizing note {note_id}: {e}")
+                        print(f"Error organising note {note_id}: {e}")
                 
-                result = f"""Auto-Organization Complete:
-- Total notes: {len(all_note_ids)}
-- Organized: {organized_count}
-- Skipped (already assigned): {skipped_count}
-- Errors: {error_count}
-"""
-                return result
+                result = f"""Auto-Organization Complete:\n- Total notes: {len(all_note_ids)}\n- Organised: {organised_count}\n- Skipped (already assigned): {skipped_count}\n- Errors: {error_count}\n"""
+                # Refresh UI elements
+                notes_html = refresh_notes_handler(app_state, "", True, True)
+                outline_html = refresh_outline_handler(app_state)
+                return result, notes_html, outline_html
             except Exception as e:
-                return f"Error during auto-organization: {str(e)}"
+                return f"Error during auto-organisation: {str(e)}", refresh_notes_handler(app_state, "", True, True), refresh_outline_handler(app_state)
         
         def get_stats_handler(app_state):
-            """Get organization statistics."""
+            """Get organisation statistics."""
             if not app_state:
                 return "No project loaded."
-            
             if not app_state.current_outline:
                 return "No outline loaded."
             
@@ -657,7 +700,14 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
         auto_organize_btn.click(
             fn=auto_organize_handler,
             inputs=[app_state_component],
-            outputs=[auto_organize_status]
+            outputs=[auto_organize_status, notes_display, outline_display]
+        )
+
+        # Wire drop apply hidden button to backend assignment
+        drop_apply_btn.click(
+            fn=assign_from_drop,
+            inputs=[app_state_component, drop_receiver],
+            outputs=[assignment_status, notes_display, outline_display]
         )
         
         refresh_stats_btn.click(
