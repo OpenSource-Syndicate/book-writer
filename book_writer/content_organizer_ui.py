@@ -8,6 +8,8 @@ import time
 import math
 from typing import List, Dict, Optional, Tuple
 
+from book_writer.response_handler import validate_json_response
+
 
 def get_all_notes_list(app_state, search_filter: str = "") -> List[Dict]:
     """Get all notes with preview text for display."""
@@ -542,9 +544,11 @@ def create_organizer_tab(app_state_component):
 
         # Suggestions panel (moved from Advanced Organization)
         gr.Markdown("### 🔍 Review Suggestions")
-        with gr.Row():
-            get_suggestions_btn = gr.Button("Get Suggestions", variant="secondary")
-            suggestions_output = gr.JSON(label="Suggestions", value={})
+        with gr.Row(equal_height=True):
+            with gr.Column(scale=1, min_width=180):
+                get_suggestions_btn = gr.Button("Get Suggestions", variant="secondary")
+            with gr.Column(scale=3):
+                suggestions_output = gr.JSON(label="Suggestions", value={})
 
         # Actions for suggestions
         gr.Markdown("#### Take Action on Suggestions")
@@ -552,6 +556,7 @@ def create_organizer_tab(app_state_component):
         with gr.Row():
             suggestions_selector = gr.Dropdown(label="Select Suggestion (by section)", choices=[], value=None)
             idea_selector = gr.Dropdown(label="Select Idea/Prompt", choices=[], value=None)
+        ai_plan_display = gr.JSON(label="AI Content Plan Preview", value={})
         with gr.Row():
             gen_pages_input = gr.Number(label="Target Pages", value=1, minimum=1, maximum=50, step=1)
             generate_content_btn = gr.Button("Generate Content", variant="primary")
@@ -760,6 +765,74 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
             except Exception as e:
                 return f"Error calculating statistics: {e}"
 
+        def generate_ai_plan_for_suggestion(app_state, suggestion_item):
+            """Generate a structured AI plan with topic, subtopics, and draft content."""
+            fallback_plan = {
+                "topic": suggestion_item.get("path", "Generated Section"),
+                "subtopics": [],
+                "draft_content": "",
+                "recommended_prompt": "",
+            }
+            try:
+                if not app_state or not getattr(app_state, "content_expander", None):
+                    return fallback_plan
+                mm = app_state.content_expander.model_manager
+                if not mm:
+                    return fallback_plan
+                pages_needed = max(1, int(math.ceil(suggestion_item.get("pages_needed", 1) or 1)))
+                outline_path = suggestion_item.get("path", "Current Section")
+                context_lines = []
+                if suggestion_item.get("topic_ideas"):
+                    ideas_preview = suggestion_item["topic_ideas"][:5]
+                    context_lines.append("Ideas already considered: " + "; ".join(ideas_preview))
+                if suggestion_item.get("action_items"):
+                    context_lines.append("Action items: " + ", ".join(suggestion_item["action_items"][:5]))
+                context = "\n".join(context_lines)
+                prompt = f"""
+You are an expert book writing strategist. Plan a detailed section for the book area "{outline_path}".
+Target length: approximately {pages_needed} page(s).
+{context}
+
+Return only valid JSON with the following schema:
+{{
+  "topic": string,                          # clear high-level topic for the section
+  "subtopics": [
+    {{
+      "title": string,
+      "summary": string,
+      "talking_points": [string],
+      "estimated_paragraphs": int,
+      "draft_paragraph": string             # 1-2 paragraphs covering this subtopic
+    }}
+  ],
+  "draft_content": string,                  # cohesive draft ~{pages_needed} page(s)
+  "recommended_prompt": string              # prompt tailored for a writing model
+}}
+Ensure every string is plain text (no markdown bullets).
+""".strip()
+                response = mm.generate_response(
+                    prompt=prompt,
+                    task="content_expansion",
+                    format_json=True,
+                    temperature=0.4,
+                    top_p=0.8,
+                )
+                if isinstance(response, dict):
+                    plan = response
+                else:
+                    plan = validate_json_response(response)
+                if not isinstance(plan, dict):
+                    return fallback_plan
+                plan.setdefault("topic", fallback_plan["topic"])
+                if not isinstance(plan.get("subtopics"), list):
+                    plan["subtopics"] = []
+                plan.setdefault("draft_content", "")
+                plan.setdefault("recommended_prompt", "")
+                return plan
+            except Exception as e:
+                fallback_plan["error"] = str(e)
+                return fallback_plan
+
         def get_suggestions_handler(app_state):
             """Combine organization suggestions with rich, page-target-driven expansion suggestions.
             Augment with AI-refined topic ideas in strict JSON when possible.
@@ -898,6 +971,31 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
                 # Sort by largest gap first
                 page_gap_suggestions.sort(key=lambda x: x.get("pages_needed", 0), reverse=True)
 
+                # Attach AI plans to each suggestion for automatic topic/subtopic/content generation
+                for suggestion in page_gap_suggestions:
+                    plan = generate_ai_plan_for_suggestion(app_state, suggestion)
+                    suggestion["ai_plan"] = plan
+                    # Prime prompts/ideas from plan for convenience
+                    recommended_prompt = plan.get("recommended_prompt")
+                    if recommended_prompt:
+                        prompts = suggestion.get("suggested_prompts") or []
+                        if recommended_prompt not in prompts:
+                            suggestion.setdefault("suggested_prompts", [])
+                            suggestion["suggested_prompts"].insert(0, recommended_prompt)
+                    subtopics = plan.get("subtopics") or []
+                    auto_ideas = []
+                    for sub in subtopics:
+                        if isinstance(sub, dict):
+                            title = sub.get("title")
+                            summary = sub.get("summary")
+                            if title and summary:
+                                auto_ideas.append(f"{title}: {summary}")
+                    if auto_ideas:
+                        suggestion.setdefault("topic_ideas", [])
+                        for idea in auto_ideas:
+                            if idea not in suggestion["topic_ideas"]:
+                                suggestion["topic_ideas"].append(idea)
+
                 # Overall plan to reach target
                 overall = {
                     "total_pages_needed": round(total_pages_needed, 2),
@@ -934,11 +1032,18 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
                 items = []
             # Build display labels keyed by index
             labels = []
+            first_plan = {}
             for idx, it in enumerate(items):
                 path = it.get("path", f"Suggestion {idx+1}")
                 gap = it.get("pages_needed", 0)
                 labels.append(f"{idx}: {path} (need ~{gap} pages)")
-            return gr.update(choices=labels, value=(labels[0] if labels else None)), gr.update(choices=[], value=None)
+            if items:
+                first_plan = items[0].get("ai_plan") or {}
+            return (
+                gr.update(choices=labels, value=(labels[0] if labels else None)),
+                gr.update(choices=[], value=None),
+                first_plan,
+            )
 
         def on_select_suggestion(_, suggestions_json_str, selected_label):
             """Populate idea selector when a suggestion is chosen."""
@@ -948,17 +1053,19 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
             except Exception:
                 items = []
             if not selected_label:
-                return gr.update(choices=[], value=None)
+                return gr.update(choices=[], value=None), {}
             try:
                 idx = int(selected_label.split(":", 1)[0])
             except Exception:
                 idx = 0
             ideas = []
+            plan = {}
             if 0 <= idx < len(items):
                 ideas = (items[idx].get("suggested_prompts") or []) + (items[idx].get("topic_ideas") or [])
+                plan = items[idx].get("ai_plan") or {}
             # Limit to a reasonable size
             ideas = ideas[:50]
-            return gr.update(choices=ideas, value=(ideas[0] if ideas else None))
+            return gr.update(choices=ideas, value=(ideas[0] if ideas else None)), plan
 
         def generate_content_from_suggestion(app_state, suggestions_json_str, selected_label, selected_idea, pages):
             if not app_state:
@@ -972,13 +1079,39 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
                     return "Invalid selection."
                 chapter_id = item.get("chapter_id")
                 subtopic_id = item.get("subtopic_id")
-                prompt = selected_idea or (item.get("suggested_prompts") or ["Expand this section."])[0]
+                user_prompt = selected_idea or (item.get("suggested_prompts") or ["Expand this section."])[0]
                 try:
                     p = int(pages) if pages else 1
                 except Exception:
                     p = 1
                 p = max(1, min(50, p))
-                prompt = f"Target length: ~{p} page(s).\n{prompt}"
+                plan = item.get("ai_plan") or {}
+                plan_topic = plan.get("topic")
+                plan_subtopics = plan.get("subtopics") if isinstance(plan.get("subtopics"), list) else []
+                plan_outline_lines = []
+                for i, sub in enumerate(plan_subtopics, 1):
+                    if isinstance(sub, dict):
+                        title = sub.get("title") or f"Subtopic {i}"
+                        summary = sub.get("summary") or ""
+                        talking_points = sub.get("talking_points") or []
+                        outline_line = f"{i}. {title} — {summary}"
+                        if talking_points:
+                            outline_line += " | Key points: " + "; ".join(talking_points[:5])
+                        plan_outline_lines.append(outline_line)
+                plan_outline = "\n".join(plan_outline_lines)
+                draft_content = plan.get("draft_content", "")
+                prompt_sections = [
+                    f"Write ~{p} page(s) for book section: {item.get('path', 'Selected Section')}.",
+                    f"User guidance: {user_prompt}",
+                ]
+                if plan_topic:
+                    prompt_sections.append(f"Primary topic focus: {plan_topic}")
+                if plan_outline:
+                    prompt_sections.append("Outline to follow:\n" + plan_outline)
+                if draft_content:
+                    prompt_sections.append("Reference draft (revise, improve, and expand where helpful):\n" + draft_content)
+                prompt_sections.append("Deliver polished prose with smooth transitions and cohesive narrative.")
+                prompt = "\n\n".join(prompt_sections)
                 # Call app method to generate content
                 content_id = app_state.generate_content(prompt, chapter_id, subtopic_id)
                 return f"Generated content: {content_id} for {item.get('path')}"
@@ -997,7 +1130,19 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
                     return "Invalid selection."
                 chapter_id = item.get("chapter_id")
                 subtopic_id = item.get("subtopic_id")
-                note_text = selected_idea or (item.get("topic_ideas") or ["New note idea"]) [0]
+                plan = item.get("ai_plan") or {}
+                subtopics = plan.get("subtopics") if isinstance(plan.get("subtopics"), list) else []
+                plan_snippets = []
+                for sub in subtopics[:3]:
+                    if isinstance(sub, dict):
+                        title = sub.get("title")
+                        summary = sub.get("summary")
+                        if title and summary:
+                            plan_snippets.append(f"{title}: {summary}")
+                draft_content = plan.get("draft_content", "")
+                note_text = selected_idea or draft_content
+                if not note_text:
+                    note_text = "\n".join(plan_snippets) if plan_snippets else (item.get("topic_ideas") or ["New note idea"])[0]
                 note_id = app_state.process_note(note_text, source="suggestion")
                 # Assign the note to the selected section
                 assign_note_to_section(app_state, note_id, chapter_id, subtopic_id)
@@ -1101,12 +1246,12 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
         suggestions_state.change(
             fn=build_suggestion_selectors,
             inputs=[app_state_component, suggestions_state],
-            outputs=[suggestions_selector, idea_selector]
+            outputs=[suggestions_selector, idea_selector, ai_plan_display]
         )
         suggestions_selector.change(
             fn=on_select_suggestion,
             inputs=[app_state_component, suggestions_state, suggestions_selector],
-            outputs=[idea_selector]
+            outputs=[idea_selector, ai_plan_display]
         )
         generate_content_btn.click(
             fn=generate_content_from_suggestion,
