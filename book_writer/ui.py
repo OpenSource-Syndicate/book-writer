@@ -1057,30 +1057,6 @@ def create_ui():
 
             # New enhanced organizer tab
             create_organizer_tab(app_state)
-            
-            with gr.TabItem("📋 Advanced Organization"):
-                gr.Markdown("## Advanced Content Organization")
-                gr.Markdown("Follow these steps to organize your content:")
-                gr.Markdown("1. **Organize Content:** Click the 'Organize Content' button to automatically cluster your content and get organization suggestions.")
-                gr.Markdown("2. **Review Suggestions:** Review the suggestions for content gaps and reorganization. You can then apply or dismiss these suggestions.")
-                gr.Markdown("3. **Visualize Structure:** Generate a visualization of your content structure to better understand the relationships between your content.")
-
-                with gr.Tabs():
-                    with gr.TabItem("Step 1: Organize Content"):
-                        gr.Markdown("### Organize Your Content")
-                        content_ids_input = gr.Textbox(label="Content IDs", placeholder="Enter a comma-separated list of content IDs to organize", lines=1)
-                        organize_content_btn = gr.Button("Organize Content", variant="primary")
-                        organization_summary_output = gr.JSON(label="Organization Summary")
-
-                    with gr.TabItem("Step 2: Review Suggestions"):
-                        gr.Markdown("### Review Organization Suggestions")
-                        get_suggestions_btn = gr.Button("Get Suggestions", variant="primary")
-                        suggestions_output = gr.JSON(label="Organization Suggestions")
-
-                    with gr.TabItem("Step 3: Visualize Structure"):
-                        gr.Markdown("### Visualize Content Structure")
-                        visualize_content_btn = gr.Button("Visualize Content", variant="primary")
-                        visualization_output = gr.Image(label="Content Structure Visualization")
 
             with gr.TabItem("📚 Outline & Assembly"):
                 gr.Markdown("## Book Outline and Export")
@@ -1204,49 +1180,7 @@ def create_ui():
             outputs=[app_state, project_path_display, outline_display]
         )
 
-        def organize_content_ui(app_state, content_ids_str):
-            if not app_state:
-                gr.Warning("Please load a project first.")
-                return None
-            if not content_ids_str:
-                gr.Warning("Please enter content IDs.")
-                return None
-            content_ids = [c.strip() for c in content_ids_str.split(',')]
-            summary = app_state.organize_content(content_ids)
-            return summary
-
-        def get_suggestions_ui(app_state):
-            if not app_state:
-                gr.Warning("Please load a project first.")
-                return None
-            suggestions = app_state.get_organization_suggestions()
-            return suggestions
-
-        def visualize_content_ui(app_state):
-            if not app_state:
-                gr.Warning("Please load a project first.")
-                return None
-            output_path = app_state.project_path / "visualizations" / "content_structure.png"
-            app_state.visualize_content_structure(output_path)
-            return str(output_path)
-
-        organize_content_btn.click(
-            fn=organize_content_ui,
-            inputs=[app_state, content_ids_input],
-            outputs=[organization_summary_output]
-        )
-
-        get_suggestions_btn.click(
-            fn=get_suggestions_ui,
-            inputs=[app_state],
-            outputs=[suggestions_output]
-        )
-
-        visualize_content_btn.click(
-            fn=visualize_content_ui,
-            inputs=[app_state],
-            outputs=[visualization_output]
-        )
+        # Advanced Organization tab removed; suggestions integrated into Notes Organizer
         
         add_note_btn.click(
             fn=add_note_async,

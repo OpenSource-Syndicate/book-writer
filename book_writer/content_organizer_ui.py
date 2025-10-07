@@ -5,6 +5,7 @@ Provides drag-and-drop-like interface for organizing notes into outline structur
 import gradio as gr
 import json
 import time
+import math
 from typing import List, Dict, Optional, Tuple
 
 
@@ -538,6 +539,12 @@ def create_organizer_tab(app_state_component):
         with gr.Row():
             stats_display = gr.Textbox(label="Organization Statistics", lines=8, interactive=False)
             refresh_stats_btn = gr.Button("📊 Refresh Statistics")
+
+        # Suggestions panel (moved from Advanced Organization)
+        gr.Markdown("### 🔍 Review Suggestions")
+        with gr.Row():
+            get_suggestions_btn = gr.Button("Get Suggestions", variant="secondary")
+            suggestions_output = gr.JSON(label="Suggestions", value={})
         
         # Event handlers
         def refresh_notes_handler(app_state, search, show_assigned, show_unassigned):
@@ -740,6 +747,53 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
                 return stats
             except Exception as e:
                 return f"Error calculating statistics: {e}"
+
+        def get_suggestions_handler(app_state):
+            """Combine organization suggestions with page-gap based expansion suggestions."""
+            if not app_state:
+                return {"error": "No project loaded."}
+            try:
+                # Existing organization suggestions (if implemented)
+                try:
+                    org_suggestions = app_state.get_organization_suggestions()
+                except Exception as _:
+                    org_suggestions = {}
+
+                # Page-gap suggestions from progress
+                page_gap_suggestions = []
+                try:
+                    progress = app_state.get_writing_progress()
+                    for part in (progress.get("progress_by_section") or []):
+                        part_title = part.get("title", "Part")
+                        for chapter in (part.get("chapters") or []):
+                            chapter_title = chapter.get("title", "Chapter")
+                            for sub in (chapter.get("subtopics") or []):
+                                target = float(sub.get("target_pages", 0) or 0)
+                                written = float(sub.get("written_pages", 0) or 0)
+                                gap = max(0.0, target - written)
+                                if gap > 0.05:  # suggest only when meaningful gap exists
+                                    page_gap_suggestions.append({
+                                        "path": f"{part_title} > {chapter_title} > {sub.get('title','Subtopic')}",
+                                        "target_pages": round(target, 2),
+                                        "written_pages": round(written, 2),
+                                        "pages_needed": round(gap, 2),
+                                        "recommended_actions": [
+                                            f"Expand content by ~{int(math.ceil(gap))} page(s)",
+                                            "Add/expand notes mapped to this subtopic",
+                                        ]
+                                    })
+                except Exception as _:
+                    pass
+
+                # Sort by largest gap first
+                page_gap_suggestions.sort(key=lambda x: x.get("pages_needed", 0), reverse=True)
+
+                return {
+                    "page_gap_suggestions": page_gap_suggestions,
+                    "organization_suggestions": org_suggestions,
+                }
+            except Exception as e:
+                return {"error": str(e)}
         
         # Wire up events
         refresh_notes_btn.click(
@@ -818,14 +872,22 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
             inputs=[app_state_component],
             outputs=[stats_display]
         )
+
+        # Wire suggestions button
+        get_suggestions_btn.click(
+            fn=get_suggestions_handler,
+            inputs=[app_state_component],
+            outputs=[suggestions_output]
+        )
         
         # Initial load
         app_state_component.change(
             fn=lambda app_state: (
                 refresh_notes_handler(app_state, "", True, True),
                 refresh_outline_handler(app_state),
-                get_stats_handler(app_state)
+                get_stats_handler(app_state),
+                get_suggestions_handler(app_state)
             ),
             inputs=[app_state_component],
-            outputs=[notes_display, outline_display, stats_display]
+            outputs=[notes_display, outline_display, stats_display, suggestions_output]
         )
