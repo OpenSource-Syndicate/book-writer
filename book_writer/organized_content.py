@@ -19,7 +19,7 @@ import graphviz
 
 from book_writer.outline import BookOutline
 from book_writer.note_processor import NoteProcessor, ContentManager
-from book_writer.nlp_classifier import NLPContentClassifier
+from book_writer.nlp_classifier import create_nlp_classifier
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -87,8 +87,8 @@ class ContentOrganizer:
         self.note_processor = note_processor
         self.content_manager = content_manager
         
-        # Initialize NLP classifier for enhanced categorization
-        self.nlp_classifier = NLPContentClassifier()
+        # Initialize NLP classifier (singleton) for enhanced categorization
+        self.nlp_classifier = create_nlp_classifier()
         
         # Storage for relationships and clusters
         self.relationships: List[ContentRelationship] = []

@@ -1507,10 +1507,19 @@ class NLPContentClassifier:
         return text
 
 
+_NLP_CLASSIFIER_SINGLETON: Optional[NLPContentClassifier] = None
+
+
 def create_nlp_classifier() -> NLPContentClassifier:
-    """Factory function to create an NLP content classifier.
+    """Factory function to create or return a cached NLP content classifier.
+    
+    This ensures the underlying SentenceTransformer model is loaded only once
+    per process, preventing repeated downloads and heavy re-initialization.
     
     Returns:
-        An instance of NLPContentClassifier
+        A singleton instance of NLPContentClassifier
     """
-    return NLPContentClassifier()
+    global _NLP_CLASSIFIER_SINGLETON
+    if _NLP_CLASSIFIER_SINGLETON is None:
+        _NLP_CLASSIFIER_SINGLETON = NLPContentClassifier()
+    return _NLP_CLASSIFIER_SINGLETON
