@@ -69,13 +69,13 @@ def format_notes_as_html(notes_list: List[Dict], show_assigned: bool = True, sho
             max-height: 600px;
             overflow-y: auto;
             padding: 10px;
-            border: 1px solid #ddd;
+            border: 1px solid #374151; /* slate-700 */
             border-radius: 8px;
-            background: #fafafa;
+            background: #111827; /* gray-900 */
         }
         .note-item {
-            background: white;
-            border: 1px solid #e0e0e0;
+            background: #1f2937; /* gray-800 */
+            border: 1px solid #4b5563; /* gray-600 */
             border-radius: 6px;
             padding: 12px;
             margin-bottom: 8px;
@@ -86,19 +86,19 @@ def format_notes_as_html(notes_list: List[Dict], show_assigned: bool = True, sho
             gap: 10px;
         }
         .note-item:hover {
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            border-color: #4CAF50;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+            border-color: #10b981; /* emerald-500 */
         }
         .note-item.assigned {
-            border-left: 4px solid #4CAF50;
-            background: #f1f8f4;
+            border-left: 4px solid #10b981; /* emerald-500 */
+            background: #064e3b; /* emerald-900 */
         }
         .note-item.unassigned {
-            border-left: 4px solid #ff9800;
+            border-left: 4px solid #f59e0b; /* amber-500 */
         }
         .drag-handle {
             font-size: 20px;
-            color: #999;
+            color: #9ca3af; /* gray-400 */
             cursor: grab;
         }
         .drag-handle:active {
@@ -109,13 +109,13 @@ def format_notes_as_html(notes_list: List[Dict], show_assigned: bool = True, sho
         }
         .note-id {
             font-size: 11px;
-            color: #666;
+            color: #d1d5db; /* gray-300 */
             font-family: monospace;
             margin-bottom: 4px;
         }
         .note-preview {
             font-size: 14px;
-            color: #333;
+            color: #f3f4f6; /* gray-100 */
             line-height: 1.4;
         }
         .note-status {
@@ -125,12 +125,12 @@ def format_notes_as_html(notes_list: List[Dict], show_assigned: bool = True, sho
             font-weight: 500;
         }
         .status-assigned {
-            background: #c8e6c9;
-            color: #2e7d32;
+            background: #065f46; /* emerald-800 */
+            color: #a7f3d0; /* emerald-200 */
         }
         .status-unassigned {
-            background: #ffe0b2;
-            color: #e65100;
+            background: #78350f; /* amber-900 */
+            color: #fde68a; /* amber-200 */
         }
     </style>
     <div class="notes-container">
@@ -175,13 +175,13 @@ def format_outline_as_interactive_tree(app_state) -> str:
             max-height: 600px;
             overflow-y: auto;
             padding: 10px;
-            border: 1px solid #ddd;
+            border: 1px solid #374151; /* slate-700 */
             border-radius: 8px;
-            background: #fafafa;
+            background: #0b1220; /* near dark */
         }
         .outline-part {
-            background: white;
-            border: 1px solid #e0e0e0;
+            background: #111827; /* gray-900 */
+            border: 1px solid #4b5563; /* gray-600 */
             border-radius: 6px;
             padding: 10px;
             margin-bottom: 10px;
@@ -189,51 +189,51 @@ def format_outline_as_interactive_tree(app_state) -> str:
         .outline-part-header {
             font-weight: bold;
             font-size: 16px;
-            color: #1976d2;
+            color: #93c5fd; /* blue-300 */
             margin-bottom: 8px;
             padding: 8px;
-            background: #e3f2fd;
+            background: #1e3a8a; /* blue-900 */
             border-radius: 4px;
         }
         .outline-chapter {
             margin-left: 15px;
             margin-bottom: 8px;
             padding: 8px;
-            background: #f5f5f5;
+            background: #0f172a; /* slate-900 */
             border-radius: 4px;
         }
         .outline-chapter-header {
             font-weight: 600;
             font-size: 14px;
-            color: #0288d1;
+            color: #60a5fa; /* blue-400 */
             margin-bottom: 6px;
         }
         .outline-subtopic {
             margin-left: 15px;
             padding: 8px 12px;
             margin-bottom: 4px;
-            background: white;
-            border: 1px solid #e0e0e0;
+            background: #111827; /* gray-900 */
+            border: 1px solid #4b5563; /* gray-600 */
             border-radius: 4px;
             cursor: pointer;
             transition: all 0.2s;
         }
         .outline-subtopic:hover {
-            background: #fff9c4;
-            border-color: #fbc02d;
+            background: #1f2937; /* gray-800 */
+            border-color: #f59e0b; /* amber-500 */
         }
         .outline-subtopic.drop-target {
-            background: #c8e6c9;
-            border: 2px dashed #4caf50;
+            background: #065f46; /* emerald-800 */
+            border: 2px dashed #10b981; /* emerald-500 */
         }
         .subtopic-title {
             font-size: 13px;
-            color: #424242;
+            color: #e5e7eb; /* gray-200 */
         }
         .note-count-badge {
             display: inline-block;
-            background: #e0e0e0;
-            color: #616161;
+            background: #374151; /* gray-700 */
+            color: #f9fafb; /* gray-50 */
             font-size: 11px;
             padding: 2px 8px;
             border-radius: 10px;
@@ -349,11 +349,11 @@ def format_outline_as_interactive_tree(app_state) -> str:
                     inputEl.value = payload;
                     inputEl.dispatchEvent(new Event('input', { bubbles: true }));
                     // Visual feedback
-                    e.currentTarget.style.background = '#c8e6c9';
+                    e.currentTarget.style.background = '#065f46';
                     // Trigger backend assignment
                     btnEl.click();
                     setTimeout(() => {
-                        e.currentTarget.style.background = 'white';
+                        e.currentTarget.style.background = '#111827';
                     }, 600);
                 } else {
                     console.warn('Drop bridge elements not found.');
