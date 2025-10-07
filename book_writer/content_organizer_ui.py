@@ -554,6 +554,58 @@ def create_organizer_tab(app_state_component):
             outline_html = refresh_outline_handler(app_state)
             return msg, notes_html, outline_html
 
+        def refresh_multiselect_and_targets(app_state, search):
+            """Populate multi-select choices and target dropdown, return also labels map state."""
+            notes_list = get_all_notes_list(app_state, search)
+            choices = [f"{n['id']} : {n['preview'][:60]}" for n in notes_list]
+            label_to_id = {f"{n['id']} : {n['preview'][:60]}": n['id'] for n in notes_list}
+            target_options, _ = get_outline_target_options(app_state)
+            return (
+                gr.update(choices=choices, value=[]),
+                gr.update(choices=target_options, value=None),
+                json.dumps(label_to_id),
+            )
+
+        def assign_selected_handler(app_state, selected_labels, target_label, label_to_id_json):
+            """Assign selected notes to chosen subtopic reliably (non-DnD)."""
+            if not app_state:
+                return (
+                    "No project loaded.",
+                    refresh_notes_handler(app_state, "", True, True),
+                    refresh_outline_handler(app_state),
+                    gr.update(value=selected_labels or []),
+                )
+            if not target_label:
+                return (
+                    "Please select a target subtopic.",
+                    refresh_notes_handler(app_state, "", True, True),
+                    refresh_outline_handler(app_state),
+                    gr.update(value=selected_labels or []),
+                )
+            try:
+                label_to_id = json.loads(label_to_id_json or "{}")
+            except Exception:
+                label_to_id = {}
+            note_ids = [label_to_id.get(lbl, (lbl.split(" : ")[0] if isinstance(lbl, str) else lbl)) for lbl in (selected_labels or [])]
+            _, mapping = get_outline_target_options(app_state)
+            if target_label not in mapping:
+                return (
+                    "Invalid target selected.",
+                    refresh_notes_handler(app_state, "", True, True),
+                    refresh_outline_handler(app_state),
+                    gr.update(value=selected_labels or []),
+                )
+            chapter_id, subtopic_id = mapping[target_label]
+            for nid in note_ids:
+                assign_note_to_section(app_state, nid, chapter_id, subtopic_id)
+            # Refresh and clear selection
+            return (
+                f"Assigned {len(note_ids)} note(s) to {target_label}",
+                refresh_notes_handler(app_state, "", True, True),
+                refresh_outline_handler(app_state),
+                gr.update(value=[]),
+            )
+
         def assign_from_drop(app_state, payload_json):
             """Handle drop payload coming from JS and assign the note."""
             try:
@@ -722,27 +774,16 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
             outputs=[outline_display]
         )
 
+        # Hidden state to carry label->id map
+        labels_map_state = gr.State("")
         # Populate multiselect and targets initially and on search
         app_state_component.change(
             fn=refresh_multiselect_and_targets,
             inputs=[app_state_component, search_input],
-            outputs=[notes_multiselect, target_dropdown, gr.State()]
-        )
-        search_input.change(
-            fn=refresh_multiselect_and_targets,
-            inputs=[app_state_component, search_input],
-            outputs=[notes_multiselect, target_dropdown, gr.State()]
-        )
-
-        # Hidden state to carry label->id map
-        labels_map_state = gr.State("")
-        app_state_component.change(
-            fn=lambda app_state, q: refresh_multiselect_and_targets(app_state, q),
-            inputs=[app_state_component, search_input],
             outputs=[notes_multiselect, target_dropdown, labels_map_state]
         )
         search_input.change(
-            fn=lambda app_state, q: refresh_multiselect_and_targets(app_state, q),
+            fn=refresh_multiselect_and_targets,
             inputs=[app_state_component, search_input],
             outputs=[notes_multiselect, target_dropdown, labels_map_state]
         )
