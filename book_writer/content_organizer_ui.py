@@ -138,6 +138,77 @@ def format_notes_as_html(notes_list: List[Dict], show_assigned: bool = True, sho
     <div class="notes-container">
     """
     
+    # Add CSS for the suggestions panel
+    suggestions_css = '''
+    <style>
+        .suggestions-container {
+            background: #111827; /* gray-900 */
+            border: 1px solid #374151; /* slate-700 */
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 10px;
+        }
+        .suggestions-header {
+            font-size: 18px;
+            font-weight: 600;
+            color: #f3f4f6; /* gray-100 */
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .suggestions-stats {
+            background: #1f2937; /* gray-800 */
+            border: 1px solid #4b5563; /* gray-600 */
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 15px;
+        }
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #374151;
+        }
+        .stat-label {
+            color: #9ca3af; /* gray-400 */
+        }
+        .stat-value {
+            color: #f3f4f6; /* gray-100 */
+            font-weight: 500;
+        }
+        .priority-high {
+            color: #ef4444; /* red-500 */
+            font-weight: 600;
+        }
+        .priority-medium {
+            color: #f59e0b; /* amber-500 */
+            font-weight: 600;
+        }
+        .priority-low {
+            color: #22c55e; /* green-500 */
+            font-weight: 600;
+        }
+        .progress-bar {
+            height: 20px;
+            background: #374151; /* gray-700 */
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #10b981, #3b82f6);
+            border-radius: 10px;
+        }
+        .tab-content {
+            min-height: 300px;
+        }
+    </style>
+    '''
+    
+    html += suggestions_css
+    
     for note in notes_list:
         # Filter by assignment status
         if note["is_assigned"] and not show_assigned:
@@ -245,6 +316,48 @@ def format_outline_as_interactive_tree(app_state) -> str:
     <div class="outline-tree-container">
     """
     
+    # Add CSS for enhanced outline styling
+    outline_css = '''
+    <style>
+        .outline-section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .outline-section-title {
+            font-weight: 600;
+        }
+        .outline-section-stats {
+            font-size: 12px;
+            background: #374151; /* gray-700 */
+            color: #f9fafb; /* gray-50 */
+            padding: 2px 8px;
+            border-radius: 12px;
+        }
+        .priority-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .priority-high {
+            background-color: #ef4444; /* red-500 */
+        }
+        .priority-medium {
+            background-color: #f59e0b; /* amber-500 */
+        }
+        .priority-low {
+            background-color: #22c55e; /* green-500 */
+        }
+        .priority-none {
+            background-color: #6b7280; /* gray-500 */
+        }
+    </style>
+    '''
+    
+    html += outline_css
+    
     # Get note assignments
     note_assignments = {}
     try:
@@ -288,6 +401,10 @@ def format_outline_as_interactive_tree(app_state) -> str:
                 key = f"{chapter_id}_{subtopic_id}"
                 note_count = note_assignments.get(key, 0)
                 
+                # Determine priority level for this subtopic (simplified approach)
+                priority_level = "none"  # Default priority
+                priority_color = "#6b7280"  # gray-500
+                
                 html += f"""
                 <div class="outline-subtopic" 
                      data-chapter-id="{chapter_id}" 
@@ -295,8 +412,13 @@ def format_outline_as_interactive_tree(app_state) -> str:
                      ondrop="handleDrop(event)" 
                      ondragover="handleDragOver(event)"
                      ondragleave="handleDragLeave(event)">
-                    <span class="subtopic-title">📄 {subtopic_title}</span>
-                    <span class="note-count-badge">{note_count} notes</span>
+                    <div class="outline-section-header">
+                        <span class="outline-section-title">
+                            <span class="priority-indicator priority-{priority_level}" style="background-color: {priority_color};"></span>
+                            📄 {subtopic_title}
+                        </span>
+                        <span class="outline-section-stats">{note_count} notes</span>
+                    </div>
                 </div>
                 """
             
@@ -542,27 +664,65 @@ def create_organizer_tab(app_state_component):
             stats_display = gr.Textbox(label="Organization Statistics", lines=8, interactive=False)
             refresh_stats_btn = gr.Button("📊 Refresh Statistics")
 
-        # Suggestions panel (moved from Advanced Organization)
-        gr.Markdown("### 🔍 Review Suggestions")
-        with gr.Row(equal_height=True):
-            with gr.Column(scale=1, min_width=220):
-                get_suggestions_btn = gr.Button("Get Suggestions", variant="secondary")
-                suggestions_overview = gr.Markdown("No suggestions yet. Click **Get Suggestions** to analyze the outline.", elem_id="suggestions-overview")
-            with gr.Column(scale=3):
-                suggestions_output = gr.JSON(label="Suggestions", value={})
+        # Enhanced Suggestions panel with improved layout
+        gr.Markdown("### 🔍 AI-Powered Writing Suggestions")
+        with gr.Tabs():
+            with gr.TabItem("📋 Overview"):
+                with gr.Row(equal_height=True):
+                    with gr.Column(scale=1, min_width=250):
+                        get_suggestions_btn = gr.Button("🔄 Refresh Suggestions", variant="primary", size="lg")
+                        suggestions_overview = gr.Markdown("""**AI Writing Assistant**
 
-        # Actions for suggestions
-        gr.Markdown("#### Take Action on Suggestions")
+Get personalized suggestions to enhance your book:
+- Identify content gaps
+- Suggest new topics
+- Recommend expansion ideas
+
+Click **Refresh Suggestions** to analyze your outline.""", elem_id="suggestions-overview")
+                        suggestions_stats = gr.Markdown("", elem_id="suggestions-stats")
+                    with gr.Column(scale=2):
+                        suggestions_output = gr.JSON(label="🔍 Detailed Analysis", value={})
+            
+            with gr.TabItem("📝 Content Ideas"):
+                with gr.Row():
+                    suggestions_selector = gr.Dropdown(label="📚 Select Section", choices=[], value=None, interactive=True)
+                    refresh_suggestions_selector_btn = gr.Button("🔄 Refresh Sections", size="sm")
+                
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        idea_selector = gr.Dropdown(label="💡 Choose an Idea or Prompt", choices=[], value=None, interactive=True)
+                        idea_preview = gr.Textbox(label="📝 Idea Preview", lines=3, interactive=False, placeholder="Select an idea to preview...")
+                    with gr.Column(scale=1):
+                        ai_plan_display = gr.JSON(label="🧠 AI Content Plan", value={})
+                
+                with gr.Accordion("✨ Advanced Options", open=False):
+                    with gr.Row():
+                        gen_pages_input = gr.Number(label="📄 Target Pages", value=1, minimum=1, maximum=50, step=1)
+                        content_style = gr.Dropdown(label="✒️ Writing Style", choices=["Academic", "Narrative", "Technical", "Conversational"], value="Narrative")
+                
+                with gr.Row():
+                    generate_content_btn = gr.Button("✍️ Generate Content", variant="primary", size="lg")
+                    add_as_note_btn = gr.Button("➕ Add as Note", variant="secondary", size="lg")
+                    save_idea_btn = gr.Button("💾 Save Idea", variant="secondary", size="lg")
+                
+                with gr.Row():
+                    action_status = gr.Textbox(label="✅ Status", interactive=False)
+            
+            with gr.TabItem("📊 Progress Insights"):
+                with gr.Row():
+                    progress_summary = gr.Markdown("", elem_id="progress-summary")
+                    refresh_progress_btn = gr.Button("🔄 Refresh Progress", size="sm")
+                
+                with gr.Row():
+                    progress_chart = gr.Plot(label="📈 Writing Progress")
+                    progress_details = gr.JSON(label="📋 Progress Details", value={})
+                
+                with gr.Row():
+                    recommendations = gr.Textbox(label="🎯 Recommendations", lines=5, interactive=False)
+        
+        # Hidden state for suggestions
         suggestions_state = gr.State("")
-        with gr.Row():
-            suggestions_selector = gr.Dropdown(label="Select Suggestion (by section)", choices=[], value=None)
-            idea_selector = gr.Dropdown(label="Select Idea/Prompt", choices=[], value=None)
-        ai_plan_display = gr.JSON(label="AI Content Plan Preview", value={})
-        with gr.Row():
-            gen_pages_input = gr.Number(label="Target Pages", value=1, minimum=1, maximum=50, step=1)
-            generate_content_btn = gr.Button("Generate Content", variant="primary")
-            add_as_note_btn = gr.Button("Add as Note", variant="secondary")
-        action_status = gr.Textbox(label="Action Status", interactive=False)
+        saved_ideas_state = gr.State([])
         
         # Event handlers
         def refresh_notes_handler(app_state, search, show_assigned, show_unassigned):
@@ -773,6 +933,10 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
                 "subtopics": [],
                 "draft_content": "",
                 "recommended_prompt": "",
+                "writing_style": "Academic",
+                "target_audience": "General readers",
+                "key_points": [],
+                "estimated_reading_time": "5 minutes"
             }
             try:
                 if not app_state or not getattr(app_state, "content_expander", None):
@@ -807,7 +971,11 @@ Return only valid JSON with the following schema:
     }}
   ],
   "draft_content": string,                  # cohesive draft ~{pages_needed} page(s)
-  "recommended_prompt": string              # prompt tailored for a writing model
+  "recommended_prompt": string,             # prompt tailored for a writing model
+  "writing_style": string,                 # suggested writing style (Academic, Narrative, Technical, Conversational)
+  "target_audience": string,               # who should read this content
+  "key_points": [string],                  # 3-5 key takeaways
+  "estimated_reading_time": string         # estimated time to read this content
 }}
 Ensure every string is plain text (no markdown bullets).
 """.strip()
@@ -829,6 +997,11 @@ Ensure every string is plain text (no markdown bullets).
                     plan["subtopics"] = []
                 plan.setdefault("draft_content", "")
                 plan.setdefault("recommended_prompt", "")
+                plan.setdefault("writing_style", "Academic")
+                plan.setdefault("target_audience", "General readers")
+                if not isinstance(plan.get("key_points"), list):
+                    plan["key_points"] = []
+                plan.setdefault("estimated_reading_time", "5 minutes")
                 return plan
             except Exception as e:
                 fallback_plan["error"] = str(e)
@@ -836,23 +1009,60 @@ Ensure every string is plain text (no markdown bullets).
 
         def build_suggestions_summary_markdown(suggestions_data):
             if not suggestions_data:
-                return "**Summary**\n- **Suggestions**: None yet\n- **Action**: Click the button to analyze your outline."
+                return """**AI Writing Assistant**
+
+Get personalized suggestions to enhance your book:
+- Identify content gaps
+- Suggest new topics
+- Recommend expansion ideas
+
+Click **Refresh Suggestions** to analyze your outline."""
             overall = suggestions_data.get("overall") or {}
             gap_items = suggestions_data.get("page_gap_suggestions") or []
             total_needed = overall.get("total_pages_needed")
             remaining = overall.get("remaining_pages_to_target")
             target = overall.get("target_pages")
             written = overall.get("written_pages")
-            summary_lines = ["**Summary**"]
-            summary_lines.append(f"- **Suggestions**: {len(gap_items)} ready to review")
+            
+            # Calculate progress percentage
+            progress_percentage = 0
+            if target is not None and target > 0:
+                progress_percentage = min(100, max(0, (written or 0) / float(target) * 100))
+            
+            # Create enhanced summary with visual indicators
+            summary_lines = ["## 📊 Writing Progress Dashboard\n"]
+            
+            # Progress bar visualization
+            bar_length = 20
+            filled_length = int(progress_percentage / 100 * bar_length)
+            bar = '█' * filled_length + '░' * (bar_length - filled_length)
+            
+            summary_lines.append(f"### 📈 Overall Progress: {progress_percentage:.1f}%")
+            summary_lines.append(f"`{bar}` {progress_percentage:.1f}%\n")
+            
+            if written is not None and target is not None:
+                summary_lines.append(f"**Pages Written**: {round(written or 0, 2)} / {float(target):.0f}")
+            
             if total_needed is not None:
-                summary_lines.append(f"- **Gap estimate**: {round(total_needed, 2)} page(s) suggested")
-            if target is not None and written is not None:
-                summary_lines.append(f"- **Progress**: {round(written or 0, 2)} / {float(target):.0f} pages")
+                summary_lines.append(f"**Content Gap**: {round(total_needed, 2)} page(s) suggested")
+            
             if remaining is not None:
-                summary_lines.append(f"- **Remaining to target**: {round(max(0.0, remaining or 0), 2)} page(s)")
-            if not gap_items:
-                summary_lines.append("- **Mode**: Enhancement prompts generated (no major gaps detected)")
+                summary_lines.append(f"**Remaining**: {round(max(0.0, remaining or 0), 2)} page(s) to target")
+            
+            summary_lines.append(f"**Suggestions Available**: {len(gap_items)} sections ready for review\n")
+            
+            # Add recommendations
+            if gap_items:
+                summary_lines.append("### 💡 AI Recommendations")
+                summary_lines.append("1. Review content gap suggestions in the 'Content Ideas' tab")
+                summary_lines.append("2. Generate content for high-priority sections")
+                summary_lines.append("3. Add AI-suggested ideas as notes for future expansion")
+            else:
+                summary_lines.append("### ✅ Great Work!")
+                summary_lines.append("- No major content gaps detected")
+                summary_lines.append("- Consider enhancing existing sections with new ideas")
+                summary_lines.append("- Review 'Enhancement Suggestions' for polish opportunities")
+            
             return "\n".join(summary_lines)
 
         def suggestions_state_to_outputs(suggestions_json_str):
@@ -861,7 +1071,37 @@ Ensure every string is plain text (no markdown bullets).
             except Exception:
                 data = {}
             summary_md = build_suggestions_summary_markdown(data)
-            return data, summary_md
+            # Add statistics display
+            stats_md = build_suggestions_stats_markdown(data)
+            return data, summary_md, stats_md
+        
+        def build_suggestions_stats_markdown(suggestions_data):
+            if not suggestions_data:
+                return ""
+            overall = suggestions_data.get("overall") or {}
+            gap_items = suggestions_data.get("page_gap_suggestions") or []
+            
+            # Calculate statistics
+            total_suggestions = len(gap_items)
+            total_pages_needed = overall.get("total_pages_needed", 0)
+            avg_pages_per_suggestion = total_pages_needed / total_suggestions if total_suggestions > 0 else 0
+            
+            # Find priority suggestions
+            high_priority = len([s for s in gap_items if s.get("pages_needed", 0) >= 2])
+            medium_priority = len([s for s in gap_items if 0.5 <= s.get("pages_needed", 0) < 2])
+            low_priority = len([s for s in gap_items if s.get("pages_needed", 0) < 0.5])
+            
+            stats_lines = ["### 📊 AI Analysis Statistics\n"]
+            stats_lines.append(f"- **Total Suggestions**: {total_suggestions}")
+            stats_lines.append(f"- **Pages to Add**: {round(total_pages_needed, 2)}")
+            stats_lines.append(f"- **Avg. Pages/Suggestion**: {round(avg_pages_per_suggestion, 2)}\n")
+            
+            stats_lines.append("### 🔥 Priority Distribution")
+            stats_lines.append(f"- **High Priority** (2+ pages): {high_priority}")
+            stats_lines.append(f"- **Medium Priority** (0.5-2 pages): {medium_priority}")
+            stats_lines.append(f"- **Low Priority** (<0.5 pages): {low_priority}")
+            
+            return "\n".join(stats_lines)
 
         def get_suggestions_handler(app_state):
             """Combine organization suggestions with rich, page-target-driven expansion suggestions.
@@ -890,6 +1130,11 @@ Ensure every string is plain text (no markdown bullets).
                     "Address common pitfalls or misconceptions",
                     "Add a mini-FAQ (2-3 questions)",
                     "Provide a short exercise or reflection prompt",
+                    "Include a relevant quote or statistic",
+                    "Add a brief historical context",
+                    "Provide a real-world application example",
+                    "Include a comparison table or chart",
+                    "Add a troubleshooting guide section"
                 ]
                 try:
                     progress = app_state.get_writing_progress()
@@ -903,6 +1148,17 @@ Ensure every string is plain text (no markdown bullets).
                                 gap = max(0.0, target - written)
                                 if gap > 0.05:  # suggest only when meaningful gap exists
                                     total_pages_needed += gap
+                                    # Determine priority level based on gap size
+                                    if gap >= 2:
+                                        priority_level = "High"
+                                        priority_color = "#ef4444"  # red
+                                    elif gap >= 0.5:
+                                        priority_level = "Medium"
+                                        priority_color = "#f59e0b"  # amber
+                                    else:
+                                        priority_level = "Low"
+                                        priority_color = "#22c55e"  # green
+                                    
                                     # Create multiple actionable items proportional to the gap
                                     # Heuristic: ~2 actionable items per missing page
                                     items_count = max(2, int(math.ceil(gap * 2)))
@@ -914,7 +1170,7 @@ Ensure every string is plain text (no markdown bullets).
 
                                     # Generate topic-specific new content ideas proportional to the gap
                                     # Heuristic: ~3 ideas per missing page (capped to avoid overload)
-                                    ideas_count = max(3, min(12, int(math.ceil(gap * 3))))
+                                    ideas_count = max(3, min(15, int(math.ceil(gap * 3))))
                                     sub_title = sub.get('title', 'Subtopic')
                                     idea_templates = [
                                         "Foundations: Key concepts behind {}",
@@ -929,6 +1185,9 @@ Ensure every string is plain text (no markdown bullets).
                                         "FAQ: Frequently asked questions about {}",
                                         "Evaluation metrics and benchmarks for {}",
                                         "Future trends and open challenges in {}",
+                                        "Ethical considerations in {}",
+                                        "Practical tips for implementing {}",
+                                        "Common misconceptions about {}"
                                     ]
                                     topic_ideas = [idea_templates[i % len(idea_templates)].format(sub_title) for i in range(ideas_count)]
 
@@ -945,6 +1204,8 @@ Ensure every string is plain text (no markdown bullets).
                                         "target_pages": round(target, 2),
                                         "written_pages": round(written, 2),
                                         "pages_needed": round(gap, 2),
+                                        "priority_level": priority_level,
+                                        "priority_color": priority_color,
                                         "recommended_actions": [
                                             f"Expand content by ~{int(math.ceil(gap))} page(s)",
                                             "Add/expand notes mapped to this subtopic",
@@ -1017,6 +1278,17 @@ Ensure every string is plain text (no markdown bullets).
                                     written = float(sub.get("written_pages", 0) or 0)
                                     desired_extra = max(1.0, round(max(0.5, target * 0.25), 2))
                                     sub_title = sub.get("title", "Subtopic")
+                                    # Determine priority level for enhancement suggestions
+                                    if desired_extra >= 2:
+                                        priority_level = "High"
+                                        priority_color = "#ef4444"  # red
+                                    elif desired_extra >= 0.5:
+                                        priority_level = "Medium"
+                                        priority_color = "#f59e0b"  # amber
+                                    else:
+                                        priority_level = "Low"
+                                        priority_color = "#22c55e"  # green
+                                    
                                     topic_ideas = [
                                         f"Add advanced insights for {sub_title}",
                                         f"Incorporate a case study highlighting {sub_title}",
@@ -1034,6 +1306,8 @@ Ensure every string is plain text (no markdown bullets).
                                         "target_pages": round(target, 2),
                                         "written_pages": round(written, 2),
                                         "pages_needed": desired_extra,
+                                        "priority_level": priority_level,
+                                        "priority_color": priority_color,
                                         "recommended_actions": [
                                             "Polish and extend existing content with richer detail",
                                             "Add illustrative stories, data, or expert quotes",
@@ -1117,7 +1391,14 @@ Ensure every string is plain text (no markdown bullets).
             for idx, it in enumerate(items):
                 path = it.get("path", f"Suggestion {idx+1}")
                 gap = it.get("pages_needed", 0)
-                labels.append(f"{idx}: {path} (need ~{gap} pages)")
+                priority = it.get("priority_level", "Medium")
+                # Add priority indicator with emoji
+                priority_indicator = {
+                    "High": "🔴",
+                    "Medium": "🟡",
+                    "Low": "🟢"
+                }.get(priority, "⚪")
+                labels.append(f"{idx}: {priority_indicator} {path} (need ~{gap} pages)")
             if items:
                 first_plan = items[0].get("ai_plan") or {}
             return (
@@ -1231,6 +1512,33 @@ Ensure every string is plain text (no markdown bullets).
             except Exception as e:
                 return f"Error adding note: {e}"
         
+        def save_idea_from_suggestion(app_state, suggestions_json_str, selected_label, selected_idea, saved_ideas):
+            if not app_state:
+                return "No project loaded.", saved_ideas
+            try:
+                data = json.loads(suggestions_json_str or "{}")
+                items = data.get("page_gap_suggestions", [])
+                idx = int(selected_label.split(":", 1)[0]) if selected_label else 0
+                item = items[idx] if 0 <= idx < len(items) else None
+                if not item:
+                    return "Invalid selection.", saved_ideas
+                
+                # Create a structured idea to save
+                idea_to_save = {
+                    "title": f"Idea for {item.get('path', 'Unknown Section')}",
+                    "content": selected_idea or "No content provided",
+                    "section_path": item.get("path"),
+                    "pages_needed": item.get("pages_needed", 0),
+                    "timestamp": time.time()
+                }
+                
+                # Add to saved ideas list
+                updated_saved_ideas = saved_ideas + [idea_to_save]
+                
+                return f"Saved idea: {idea_to_save['title']}", updated_saved_ideas
+            except Exception as e:
+                return f"Error saving idea: {e}", saved_ideas
+        
         # Wire up events
         refresh_notes_btn.click(
             fn=refresh_notes_handler,
@@ -1322,7 +1630,7 @@ Ensure every string is plain text (no markdown bullets).
         suggestions_state.change(
             fn=suggestions_state_to_outputs,
             inputs=[suggestions_state],
-            outputs=[suggestions_output, suggestions_overview]
+            outputs=[suggestions_output, suggestions_overview, suggestions_stats]
         )
         suggestions_state.change(
             fn=build_suggestion_selectors,
@@ -1334,6 +1642,11 @@ Ensure every string is plain text (no markdown bullets).
             inputs=[app_state_component, suggestions_state, suggestions_selector],
             outputs=[idea_selector, ai_plan_display]
         )
+        idea_selector.change(
+            fn=lambda x: x if x else "",
+            inputs=[idea_selector],
+            outputs=[idea_preview]
+        )
         generate_content_btn.click(
             fn=generate_content_from_suggestion,
             inputs=[app_state_component, suggestions_state, suggestions_selector, idea_selector, gen_pages_input],
@@ -1343,6 +1656,16 @@ Ensure every string is plain text (no markdown bullets).
             fn=add_note_from_suggestion,
             inputs=[app_state_component, suggestions_state, suggestions_selector, idea_selector],
             outputs=[action_status]
+        )
+        save_idea_btn.click(
+            fn=save_idea_from_suggestion,
+            inputs=[app_state_component, suggestions_state, suggestions_selector, idea_selector, saved_ideas_state],
+            outputs=[action_status, saved_ideas_state]
+        )
+        refresh_suggestions_selector_btn.click(
+            fn=lambda app_state, suggestions_json_str: build_suggestion_selectors(app_state, suggestions_json_str),
+            inputs=[app_state_component, suggestions_state],
+            outputs=[suggestions_selector, idea_selector, ai_plan_display]
         )
         
         # Initial load
