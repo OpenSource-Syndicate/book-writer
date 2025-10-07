@@ -545,6 +545,18 @@ def create_organizer_tab(app_state_component):
         with gr.Row():
             get_suggestions_btn = gr.Button("Get Suggestions", variant="secondary")
             suggestions_output = gr.JSON(label="Suggestions", value={})
+
+        # Actions for suggestions
+        gr.Markdown("#### Take Action on Suggestions")
+        suggestions_state = gr.State("")
+        with gr.Row():
+            suggestions_selector = gr.Dropdown(label="Select Suggestion (by section)", choices=[], value=None)
+            idea_selector = gr.Dropdown(label="Select Idea/Prompt", choices=[], value=None)
+        with gr.Row():
+            gen_pages_input = gr.Number(label="Target Pages", value=1, minimum=1, maximum=50, step=1)
+            generate_content_btn = gr.Button("Generate Content", variant="primary")
+            add_as_note_btn = gr.Button("Add as Note", variant="secondary")
+        action_status = gr.Textbox(label="Action Status", interactive=False)
         
         # Event handlers
         def refresh_notes_handler(app_state, search, show_assigned, show_unassigned):
@@ -749,7 +761,9 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
                 return f"Error calculating statistics: {e}"
 
         def get_suggestions_handler(app_state):
-            """Combine organization suggestions with rich, page-target-driven expansion suggestions."""
+            """Combine organization suggestions with rich, page-target-driven expansion suggestions.
+            Augment with AI-refined topic ideas in strict JSON when possible.
+            """
             if not app_state:
                 return {"error": "No project loaded."}
             try:
@@ -795,8 +809,36 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
                                         action = action_catalog[i % len(action_catalog)]
                                         detailed_actions.append(action)
 
-                                    page_gap_suggestions.append({
+                                    # Generate topic-specific new content ideas proportional to the gap
+                                    # Heuristic: ~3 ideas per missing page (capped to avoid overload)
+                                    ideas_count = max(3, min(12, int(math.ceil(gap * 3))))
+                                    sub_title = sub.get('title', 'Subtopic')
+                                    idea_templates = [
+                                        "Foundations: Key concepts behind {}",
+                                        "Historical context and evolution of {}",
+                                        "When and why to use {} (use-cases)",
+                                        "Step-by-step tutorial: Getting started with {}",
+                                        "Deep dive: Advanced techniques in {}",
+                                        "Common pitfalls and how to avoid them in {}",
+                                        "Comparative analysis: {} vs alternative approaches",
+                                        "Mini case study: Applying {} in a real scenario",
+                                        "Checklist: Best practices for {}",
+                                        "FAQ: Frequently asked questions about {}",
+                                        "Evaluation metrics and benchmarks for {}",
+                                        "Future trends and open challenges in {}",
+                                    ]
+                                    topic_ideas = [idea_templates[i % len(idea_templates)].format(sub_title) for i in range(ideas_count)]
+
+                                    # Provide ready-to-use prompts to generate content
+                                    suggested_prompts = [
+                                        f"Write ~{int(max(1, math.ceil(gap/ideas_count*2)))} pages elaborating: '{idea}'. Include examples and a short summary." 
+                                        for idea in topic_ideas[:min(ideas_count, 10)]
+                                    ]
+
+                                    suggestion_item = {
                                         "path": f"{part_title} > {chapter_title} > {sub.get('title','Subtopic')}",
+                                        "chapter_id": chapter.get("id"),
+                                        "subtopic_id": sub.get("id"),
                                         "target_pages": round(target, 2),
                                         "written_pages": round(written, 2),
                                         "pages_needed": round(gap, 2),
@@ -805,7 +847,51 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
                                             "Add/expand notes mapped to this subtopic",
                                         ],
                                         "action_items": detailed_actions,
-                                    })
+                                        "topic_ideas": topic_ideas,
+                                        "suggested_prompts": suggested_prompts,
+                                    }
+
+                                    # Optional: AI-refine topic ideas reliably via JSON
+                                    try:
+                                        mm = app_state.content_expander.model_manager
+                                        model_cfg = mm.config.get_model_config("content_expansion")
+                                        model_name = model_cfg["model_name"]
+                                        refine_prompt = (
+                                            "You are helping expand a book section. Given the section path, propose 5-10 concise, high-impact topic ideas as JSON.\n"
+                                            "Return strictly valid JSON with a single key 'ideas' as an array of strings. No extra commentary.\n\n"
+                                            f"Section: {suggestion_item['path']}\n"
+                                        )
+                                        resp = mm.ollama_client.chat(
+                                            model=model_name,
+                                            messages=[{"role": "user", "content": refine_prompt}],
+                                            options={"temperature": 0.6, "top_p": 0.9},
+                                        )
+                                        content = resp.get("message", {}).get("content", "") if isinstance(resp, dict) else ""
+                                        # Safe JSON extraction
+                                        refined = {}
+                                        try:
+                                            refined = json.loads(content)
+                                        except Exception:
+                                            # Try to find JSON block
+                                            start = content.find('{')
+                                            end = content.rfind('}')
+                                            if start != -1 and end != -1 and end > start:
+                                                refined = json.loads(content[start:end+1])
+                                        if isinstance(refined, dict) and isinstance(refined.get('ideas'), list):
+                                            refined_ideas = [str(x) for x in refined['ideas'] if isinstance(x, (str,))]
+                                            # Merge unique
+                                            existing = set(suggestion_item["topic_ideas"]) if suggestion_item.get("topic_ideas") else set()
+                                            merged = list(existing | set(refined_ideas))
+                                            suggestion_item["topic_ideas"] = merged
+                                            # Build prompts from refined ideas too
+                                            for idea in refined_ideas:
+                                                suggestion_item["suggested_prompts"].append(
+                                                    f"Write ~1 page elaborating: '{idea}'. Include examples and transitions."
+                                                )
+                                    except Exception:
+                                        pass
+
+                                    page_gap_suggestions.append(suggestion_item)
                 except Exception as _:
                     pass
 
@@ -830,13 +916,94 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
                 except Exception:
                     pass
 
-                return {
+                result = {
                     "overall": overall,
                     "page_gap_suggestions": page_gap_suggestions,
                     "organization_suggestions": org_suggestions,
                 }
+                return result
             except Exception as e:
                 return {"error": str(e)}
+
+        def build_suggestion_selectors(_, suggestions_json_str):
+            """Populate selectors from suggestions JSON string."""
+            try:
+                data = json.loads(suggestions_json_str or "{}")
+                items = data.get("page_gap_suggestions", [])
+            except Exception:
+                items = []
+            # Build display labels keyed by index
+            labels = []
+            for idx, it in enumerate(items):
+                path = it.get("path", f"Suggestion {idx+1}")
+                gap = it.get("pages_needed", 0)
+                labels.append(f"{idx}: {path} (need ~{gap} pages)")
+            return gr.update(choices=labels, value=(labels[0] if labels else None)), gr.update(choices=[], value=None)
+
+        def on_select_suggestion(_, suggestions_json_str, selected_label):
+            """Populate idea selector when a suggestion is chosen."""
+            try:
+                data = json.loads(suggestions_json_str or "{}")
+                items = data.get("page_gap_suggestions", [])
+            except Exception:
+                items = []
+            if not selected_label:
+                return gr.update(choices=[], value=None)
+            try:
+                idx = int(selected_label.split(":", 1)[0])
+            except Exception:
+                idx = 0
+            ideas = []
+            if 0 <= idx < len(items):
+                ideas = (items[idx].get("suggested_prompts") or []) + (items[idx].get("topic_ideas") or [])
+            # Limit to a reasonable size
+            ideas = ideas[:50]
+            return gr.update(choices=ideas, value=(ideas[0] if ideas else None))
+
+        def generate_content_from_suggestion(app_state, suggestions_json_str, selected_label, selected_idea, pages):
+            if not app_state:
+                return "No project loaded."
+            try:
+                data = json.loads(suggestions_json_str or "{}")
+                items = data.get("page_gap_suggestions", [])
+                idx = int(selected_label.split(":", 1)[0]) if selected_label else 0
+                item = items[idx] if 0 <= idx < len(items) else None
+                if not item:
+                    return "Invalid selection."
+                chapter_id = item.get("chapter_id")
+                subtopic_id = item.get("subtopic_id")
+                prompt = selected_idea or (item.get("suggested_prompts") or ["Expand this section."])[0]
+                try:
+                    p = int(pages) if pages else 1
+                except Exception:
+                    p = 1
+                p = max(1, min(50, p))
+                prompt = f"Target length: ~{p} page(s).\n{prompt}"
+                # Call app method to generate content
+                content_id = app_state.generate_content(prompt, chapter_id, subtopic_id)
+                return f"Generated content: {content_id} for {item.get('path')}"
+            except Exception as e:
+                return f"Error generating content: {e}"
+
+        def add_note_from_suggestion(app_state, suggestions_json_str, selected_label, selected_idea):
+            if not app_state:
+                return "No project loaded."
+            try:
+                data = json.loads(suggestions_json_str or "{}")
+                items = data.get("page_gap_suggestions", [])
+                idx = int(selected_label.split(":", 1)[0]) if selected_label else 0
+                item = items[idx] if 0 <= idx < len(items) else None
+                if not item:
+                    return "Invalid selection."
+                chapter_id = item.get("chapter_id")
+                subtopic_id = item.get("subtopic_id")
+                note_text = selected_idea or (item.get("topic_ideas") or ["New note idea"]) [0]
+                note_id = app_state.process_note(note_text, source="suggestion")
+                # Assign the note to the selected section
+                assign_note_to_section(app_state, note_id, chapter_id, subtopic_id)
+                return f"Added note {note_id[:8]}... to {item.get('path')}"
+            except Exception as e:
+                return f"Error adding note: {e}"
         
         # Wire up events
         refresh_notes_btn.click(
@@ -918,9 +1085,38 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
 
         # Wire suggestions button
         get_suggestions_btn.click(
-            fn=get_suggestions_handler,
+            fn=lambda app_state: (
+                json.dumps(get_suggestions_handler(app_state))
+            ),
             inputs=[app_state_component],
+            outputs=[suggestions_state]
+        )
+
+        # When suggestions state changes, show parsed JSON and populate selectors
+        suggestions_state.change(
+            fn=lambda s: (json.loads(s or "{}")),
+            inputs=[suggestions_state],
             outputs=[suggestions_output]
+        )
+        suggestions_state.change(
+            fn=build_suggestion_selectors,
+            inputs=[app_state_component, suggestions_state],
+            outputs=[suggestions_selector, idea_selector]
+        )
+        suggestions_selector.change(
+            fn=on_select_suggestion,
+            inputs=[app_state_component, suggestions_state, suggestions_selector],
+            outputs=[idea_selector]
+        )
+        generate_content_btn.click(
+            fn=generate_content_from_suggestion,
+            inputs=[app_state_component, suggestions_state, suggestions_selector, idea_selector, gen_pages_input],
+            outputs=[action_status]
+        )
+        add_as_note_btn.click(
+            fn=add_note_from_suggestion,
+            inputs=[app_state_component, suggestions_state, suggestions_selector, idea_selector],
+            outputs=[action_status]
         )
         
         # Initial load
@@ -929,8 +1125,8 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
                 refresh_notes_handler(app_state, "", True, True),
                 refresh_outline_handler(app_state),
                 get_stats_handler(app_state),
-                get_suggestions_handler(app_state)
+                json.dumps(get_suggestions_handler(app_state))
             ),
             inputs=[app_state_component],
-            outputs=[notes_display, outline_display, stats_display, suggestions_output]
+            outputs=[notes_display, outline_display, stats_display, suggestions_state]
         )

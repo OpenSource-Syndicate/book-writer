@@ -55,7 +55,7 @@ async def add_note_async(app_state, note_text, source):
     gr.Success(f"Note added successfully! ID: {note_id}")
     return app_state, f"Note added: {note_id}"
 
-def expand_note_stream_with_real_time(app_state, note_id, style):
+def expand_note_stream_with_real_time(app_state, note_id, style, target_pages):
     """Streams the expansion of a note into full content in real-time."""
     if not app_state:
         gr.Warning("Please load a project first.")
@@ -84,9 +84,34 @@ def expand_note_stream_with_real_time(app_state, note_id, style):
         note_text = results_docs[0] if results_docs else ""
         metadata = results_metas[0] if results_metas else {}
         
-        # Create prompt
+        # Create prompt with target pages and simple RAG context
         expander = app_state.content_expander
-        prompt = expander._create_expansion_prompt(note_text, style)
+        base_prompt = expander._create_expansion_prompt(note_text, style)
+        try:
+            # Retrieve related context using RAG
+            retrieved_ctx = app_state.rag_writer.retrieve_context(note_text)
+            if isinstance(retrieved_ctx, list):
+                retrieved_text = "\n\n".join([str(x) for x in retrieved_ctx[:5]])  # limit
+            else:
+                retrieved_text = str(retrieved_ctx)[:4000]
+        except Exception:
+            retrieved_text = ""
+
+        try:
+            tp = int(target_pages) if target_pages else 1
+        except Exception:
+            tp = 1
+        tp = max(1, min(50, tp))
+        target_words = tp * 500
+
+        prompt = (
+            f"You are expanding a note into polished book content. Target length: ~{tp} page(s) (~{target_words} words).\n"
+            f"Requirements: Maintain coherence, add structure (headings where natural), examples, and transitions.\n"
+            f"Incorporate relevant context when helpful.\n\n"
+            f"[USER NOTE]\n{note_text}\n\n"
+            f"[RETRIEVED CONTEXT]\n{retrieved_text}\n\n"
+            f"[TASK]\n{base_prompt}"
+        )
         
         # Get model configuration
         model_cfg = app_state.content_expander.model_manager.config.get_model_config("content_expansion")
@@ -1044,6 +1069,7 @@ def create_ui():
                         gr.Markdown("### Step 2: Expand Note into Content")
                         expand_note_id_input = gr.Textbox(label="Note ID to Expand", placeholder="Enter the note ID from the status above", lines=1)
                         writing_style_dd = gr.Dropdown(label="Writing Style", choices=["academic", "narrative", "technical", "conversational"], value="narrative")
+                        expand_target_pages_input = gr.Number(label="Target Pages for Expansion", value=1, minimum=1, maximum=50, step=1)
                         expand_note_btn = gr.Button("Expand Note", variant="primary")
                         
                 gr.Markdown("### Generated Content (Editable)")
@@ -1190,7 +1216,7 @@ def create_ui():
         
         expand_note_btn.click(
             fn=expand_note_stream_with_real_time,
-            inputs=[app_state, expand_note_id_input, writing_style_dd],
+            inputs=[app_state, expand_note_id_input, writing_style_dd, expand_target_pages_input],
             outputs=[app_state, current_content_id_state, content_output_and_edit]
         )
         
