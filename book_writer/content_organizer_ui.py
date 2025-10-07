@@ -749,7 +749,7 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
                 return f"Error calculating statistics: {e}"
 
         def get_suggestions_handler(app_state):
-            """Combine organization suggestions with page-gap based expansion suggestions."""
+            """Combine organization suggestions with rich, page-target-driven expansion suggestions."""
             if not app_state:
                 return {"error": "No project loaded."}
             try:
@@ -761,6 +761,19 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
 
                 # Page-gap suggestions from progress
                 page_gap_suggestions = []
+                total_pages_needed = 0.0
+                action_catalog = [
+                    "Add a concrete example to illustrate the concept",
+                    "Introduce a short case study",
+                    "Provide a step-by-step walkthrough",
+                    "Clarify key terms and definitions",
+                    "Contrast with an alternative approach",
+                    "Add a visual description/diagram explanation",
+                    "Include a checklist or summary bullets",
+                    "Address common pitfalls or misconceptions",
+                    "Add a mini-FAQ (2-3 questions)",
+                    "Provide a short exercise or reflection prompt",
+                ]
                 try:
                     progress = app_state.get_writing_progress()
                     for part in (progress.get("progress_by_section") or []):
@@ -772,6 +785,16 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
                                 written = float(sub.get("written_pages", 0) or 0)
                                 gap = max(0.0, target - written)
                                 if gap > 0.05:  # suggest only when meaningful gap exists
+                                    total_pages_needed += gap
+                                    # Create multiple actionable items proportional to the gap
+                                    # Heuristic: ~2 actionable items per missing page
+                                    items_count = max(2, int(math.ceil(gap * 2)))
+                                    detailed_actions = []
+                                    for i in range(items_count):
+                                        # Rotate through the catalog for variety
+                                        action = action_catalog[i % len(action_catalog)]
+                                        detailed_actions.append(action)
+
                                     page_gap_suggestions.append({
                                         "path": f"{part_title} > {chapter_title} > {sub.get('title','Subtopic')}",
                                         "target_pages": round(target, 2),
@@ -780,7 +803,8 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
                                         "recommended_actions": [
                                             f"Expand content by ~{int(math.ceil(gap))} page(s)",
                                             "Add/expand notes mapped to this subtopic",
-                                        ]
+                                        ],
+                                        "action_items": detailed_actions,
                                     })
                 except Exception as _:
                     pass
@@ -788,7 +812,26 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
                 # Sort by largest gap first
                 page_gap_suggestions.sort(key=lambda x: x.get("pages_needed", 0), reverse=True)
 
+                # Overall plan to reach target
+                overall = {
+                    "total_pages_needed": round(total_pages_needed, 2),
+                }
+                # Add pacing guidance if target pages exist
+                try:
+                    total_target_pages = (app_state.config or {}).get("target_pages", 0) or 0
+                    total_written_pages = float(progress.get("total_written_pages", 0)) if 'progress' in locals() and progress else 0.0
+                    remaining = max(0.0, float(total_target_pages) - total_written_pages)
+                    overall.update({
+                        "target_pages": float(total_target_pages),
+                        "written_pages": round(total_written_pages, 2),
+                        "remaining_pages_to_target": round(remaining, 2),
+                        "pacing_suggestion": "Aim for ~{} page(s)/day to hit the target in 2 weeks.".format(int(math.ceil(remaining/14))) if remaining > 0 else "Target met or not set.",
+                    })
+                except Exception:
+                    pass
+
                 return {
+                    "overall": overall,
                     "page_gap_suggestions": page_gap_suggestions,
                     "organization_suggestions": org_suggestions,
                 }
