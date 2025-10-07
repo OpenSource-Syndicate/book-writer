@@ -545,8 +545,9 @@ def create_organizer_tab(app_state_component):
         # Suggestions panel (moved from Advanced Organization)
         gr.Markdown("### 🔍 Review Suggestions")
         with gr.Row(equal_height=True):
-            with gr.Column(scale=1, min_width=180):
+            with gr.Column(scale=1, min_width=220):
                 get_suggestions_btn = gr.Button("Get Suggestions", variant="secondary")
+                suggestions_overview = gr.Markdown("No suggestions yet. Click **Get Suggestions** to analyze the outline.", elem_id="suggestions-overview")
             with gr.Column(scale=3):
                 suggestions_output = gr.JSON(label="Suggestions", value={})
 
@@ -833,6 +834,35 @@ Ensure every string is plain text (no markdown bullets).
                 fallback_plan["error"] = str(e)
                 return fallback_plan
 
+        def build_suggestions_summary_markdown(suggestions_data):
+            if not suggestions_data:
+                return "**Summary**\n- **Suggestions**: None yet\n- **Action**: Click the button to analyze your outline."
+            overall = suggestions_data.get("overall") or {}
+            gap_items = suggestions_data.get("page_gap_suggestions") or []
+            total_needed = overall.get("total_pages_needed")
+            remaining = overall.get("remaining_pages_to_target")
+            target = overall.get("target_pages")
+            written = overall.get("written_pages")
+            summary_lines = ["**Summary**"]
+            summary_lines.append(f"- **Suggestions**: {len(gap_items)} ready to review")
+            if total_needed is not None:
+                summary_lines.append(f"- **Gap estimate**: {round(total_needed, 2)} page(s) suggested")
+            if target is not None and written is not None:
+                summary_lines.append(f"- **Progress**: {round(written or 0, 2)} / {float(target):.0f} pages")
+            if remaining is not None:
+                summary_lines.append(f"- **Remaining to target**: {round(max(0.0, remaining or 0), 2)} page(s)")
+            if not gap_items:
+                summary_lines.append("- **Mode**: Enhancement prompts generated (no major gaps detected)")
+            return "\n".join(summary_lines)
+
+        def suggestions_state_to_outputs(suggestions_json_str):
+            try:
+                data = json.loads(suggestions_json_str or "{}")
+            except Exception:
+                data = {}
+            summary_md = build_suggestions_summary_markdown(data)
+            return data, summary_md
+
         def get_suggestions_handler(app_state):
             """Combine organization suggestions with rich, page-target-driven expansion suggestions.
             Augment with AI-refined topic ideas in strict JSON when possible.
@@ -970,6 +1000,57 @@ Ensure every string is plain text (no markdown bullets).
 
                 # Sort by largest gap first
                 page_gap_suggestions.sort(key=lambda x: x.get("pages_needed", 0), reverse=True)
+
+                # If no meaningful gaps found, generate enhancement suggestions to keep momentum
+                if not page_gap_suggestions:
+                    enhancement_candidates = []
+                    progress_sections = (progress or {}).get("progress_by_section") if 'progress' in locals() else None
+                    if progress_sections:
+                        for part in progress_sections or []:
+                            part_title = part.get("title", "Part")
+                            for chapter in part.get("chapters") or []:
+                                chapter_title = chapter.get("title", "Chapter")
+                                for sub in chapter.get("subtopics") or []:
+                                    target = float(sub.get("target_pages", 0) or 0)
+                                    if target <= 0:
+                                        continue
+                                    written = float(sub.get("written_pages", 0) or 0)
+                                    desired_extra = max(1.0, round(max(0.5, target * 0.25), 2))
+                                    sub_title = sub.get("title", "Subtopic")
+                                    topic_ideas = [
+                                        f"Add advanced insights for {sub_title}",
+                                        f"Incorporate a case study highlighting {sub_title}",
+                                        f"Summarize key takeaways for {sub_title} with actionable steps",
+                                    ]
+                                    prompts = [
+                                        f"Write ~1 page expanding on {sub_title} with new examples and updated research.",
+                                        f"Draft a narrative that illustrates {sub_title} through a real-world scenario.",
+                                        f"Create a concise summary and checklist for {sub_title} to reinforce learning.",
+                                    ]
+                                    enhancement_candidates.append({
+                                        "path": f"{part_title} > {chapter_title} > {sub_title}",
+                                        "chapter_id": chapter.get("id"),
+                                        "subtopic_id": sub.get("id"),
+                                        "target_pages": round(target, 2),
+                                        "written_pages": round(written, 2),
+                                        "pages_needed": desired_extra,
+                                        "recommended_actions": [
+                                            "Polish and extend existing content with richer detail",
+                                            "Add illustrative stories, data, or expert quotes",
+                                            "Ensure transitions and conclusions feel complete",
+                                        ],
+                                        "action_items": [
+                                            "Review current paragraphs for depth gaps",
+                                            "Add at least one fresh example or anecdote",
+                                            "Highlight a key takeaway with a short summary",
+                                        ],
+                                        "topic_ideas": topic_ideas,
+                                        "suggested_prompts": prompts,
+                                        "suggestion_type": "enhancement",
+                                    })
+                    if enhancement_candidates:
+                        enhancement_candidates.sort(key=lambda x: (x.get("target_pages", 0), -x.get("written_pages", 0)), reverse=True)
+                        page_gap_suggestions = enhancement_candidates[:5]
 
                 # Attach AI plans to each suggestion for automatic topic/subtopic/content generation
                 for suggestion in page_gap_suggestions:
@@ -1239,9 +1320,9 @@ Ensure every string is plain text (no markdown bullets).
 
         # When suggestions state changes, show parsed JSON and populate selectors
         suggestions_state.change(
-            fn=lambda s: (json.loads(s or "{}")),
+            fn=suggestions_state_to_outputs,
             inputs=[suggestions_state],
-            outputs=[suggestions_output]
+            outputs=[suggestions_output, suggestions_overview]
         )
         suggestions_state.change(
             fn=build_suggestion_selectors,
