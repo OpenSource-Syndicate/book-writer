@@ -375,7 +375,7 @@ class BookWriterApp:
             written_pages += word_count / 500.0
         
         # Count total notes
-        all_notes = self.note_processor.notes_collection.get(include=["documents"])
+        all_notes = self.note_processor.notes_collection.get(include=["documents", "metadatas"])
         total_notes = len(all_notes.get("ids", [])) if all_notes and all_notes.get("ids") else 0
         
         # Calculate progress by subtopic

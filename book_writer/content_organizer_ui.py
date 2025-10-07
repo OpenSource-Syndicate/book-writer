@@ -433,6 +433,29 @@ def search_and_filter_notes(app_state, search_query: str, show_assigned: bool, s
     return format_notes_as_html(notes_list, show_assigned, show_unassigned)
 
 
+def get_outline_target_options(app_state) -> Tuple[list, dict]:
+    """Return dropdown options for target subtopics and a map to ids.
+    Returns (options, mapping) where options is a list of display strings and mapping maps display->(chapter_id, subtopic_id)
+    """
+    options = []
+    mapping = {}
+    if not app_state or not app_state.current_outline:
+        return options, mapping
+    outline = app_state.current_outline.to_dict()
+    for part in outline.get("parts", []):
+        part_title = part.get("title", "Part")
+        for chapter in part.get("chapters", []):
+            chapter_title = chapter.get("title", "Chapter")
+            chapter_id = chapter.get("id")
+            for subtopic in chapter.get("subtopics", []):
+                subtopic_title = subtopic.get("title", "Subtopic")
+                subtopic_id = subtopic.get("id")
+                label = f"{part_title} / {chapter_title} / {subtopic_title}"
+                options.append(label)
+                mapping[label] = (chapter_id, subtopic_id)
+    return options, mapping
+
+
 def create_organizer_tab(app_state_component):
     """Create the enhanced content organizer tab."""
     with gr.TabItem("🗂️ Notes Organizer"):
@@ -458,6 +481,12 @@ def create_organizer_tab(app_state_component):
                 
                 # Notes list (HTML display)
                 notes_display = gr.HTML(label="Notes")
+
+                # Non-DnD reliable assignment UI
+                gr.Markdown("### Assign Selected (Reliable)")
+                notes_multiselect = gr.CheckboxGroup(label="Select Notes", choices=[], value=[])
+                target_dropdown = gr.Dropdown(label="Target Subtopic", choices=[], value=None)
+                assign_selected_btn = gr.Button("Assign Selected Notes", variant="primary")
 
                 # Hidden bridge elements for JS-driven drops
                 drop_receiver = gr.Textbox(
@@ -598,7 +627,7 @@ def create_organizer_tab(app_state_component):
                         error_count += 1
                         print(f"Error organising note {note_id}: {e}")
                 
-                result = f"""Auto-Organization Complete:\n- Total notes: {len(all_note_ids)}\n- Organised: {organised_count}\n- Skipped (already assigned): {skipped_count}\n- Errors: {error_count}\n"""
+                result = f"""Auto-Organization Complete:\n- Total notes: {len(all_note_ids)}\n- Organized: {organized_count}\n- Skipped (already assigned): {skipped_count}\n- Errors: {error_count}\n"""
                 # Refresh UI elements
                 notes_html = refresh_notes_handler(app_state, "", True, True)
                 outline_html = refresh_outline_handler(app_state)
@@ -668,7 +697,9 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
         )
         
         search_input.change(
-            fn=refresh_notes_handler,
+            fn=lambda app_state, q, sa, su: (
+                refresh_notes_handler(app_state, q, sa, su)
+            ),
             inputs=[app_state_component, search_input, show_assigned_check, show_unassigned_check],
             outputs=[notes_display]
         )
@@ -689,6 +720,37 @@ Progress: {(assigned_notes/total_notes*100):.1f}% organized
             fn=refresh_outline_handler,
             inputs=[app_state_component],
             outputs=[outline_display]
+        )
+
+        # Populate multiselect and targets initially and on search
+        app_state_component.change(
+            fn=refresh_multiselect_and_targets,
+            inputs=[app_state_component, search_input],
+            outputs=[notes_multiselect, target_dropdown, gr.State()]
+        )
+        search_input.change(
+            fn=refresh_multiselect_and_targets,
+            inputs=[app_state_component, search_input],
+            outputs=[notes_multiselect, target_dropdown, gr.State()]
+        )
+
+        # Hidden state to carry label->id map
+        labels_map_state = gr.State("")
+        app_state_component.change(
+            fn=lambda app_state, q: refresh_multiselect_and_targets(app_state, q),
+            inputs=[app_state_component, search_input],
+            outputs=[notes_multiselect, target_dropdown, labels_map_state]
+        )
+        search_input.change(
+            fn=lambda app_state, q: refresh_multiselect_and_targets(app_state, q),
+            inputs=[app_state_component, search_input],
+            outputs=[notes_multiselect, target_dropdown, labels_map_state]
+        )
+
+        assign_selected_btn.click(
+            fn=assign_selected_handler,
+            inputs=[app_state_component, notes_multiselect, target_dropdown, labels_map_state],
+            outputs=[assignment_status, notes_display, outline_display, notes_multiselect]
         )
         
         manual_assign_btn.click(
