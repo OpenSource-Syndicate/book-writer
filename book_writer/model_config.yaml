@@ -18,4 +18,4 @@ models:
     max_tokens: 512
     top_p: 0.8
 ollama:
-  base_url: http://localhost:11434
+  base_url: http://192.168.31.157:11434

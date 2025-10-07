@@ -43,13 +43,21 @@ def main():
         print("Launching Gradio Web UI...")
         # The UI manages its own project loading, so we just launch it
         web_ui = create_ui()
-        web_ui.launch(share=True) # Using share=True for easy access
+        # Enable queue to handle async handlers and ensure stability
+        web_ui = web_ui.queue()
+        # Force blocking launch to prevent early process exit in some environments
+        web_ui.launch(
+            share=True,
+            server_name="127.0.0.1",
+            server_port=7860,
+            show_error=True,
+            prevent_thread_lock=False  # ensure this call blocks until shutdown
+        )
     else:
         print(f"Starting interactive CLI for project at: {project_path}")
         if not project_path.exists():
             print(f"Project path not found. Creating a new project at {project_path}")
             
-            # Prompt for book title
             book_title = input("What is the title of your book? (default: 'My Book'): ").strip()
             if not book_title:
                 book_title = "My Book"

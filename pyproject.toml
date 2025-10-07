@@ -24,4 +24,5 @@ dependencies = [
     "nltk>=3.9.2",
     "weaviate-client>=4.17.0",
     "graphviz>=0.20.1",
+    "huggingface-hub[hf-xet]>=0.35.3",
 ]
