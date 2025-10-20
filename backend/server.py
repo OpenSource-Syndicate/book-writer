@@ -525,7 +525,7 @@ async def update_api_settings(settings: ApiSettingsUpdate):
     # If using Emergent key, load it
     if not settings.use_custom_api:
         settings_dict['api_key'] = os.environ.get('EMERGENT_LLM_KEY', '')
-        settings_dict['api_endpoint'] = 'https://api.openai.com/v1'
+        settings_dict['api_endpoint'] = os.environ.get('integration_proxy_url', 'https://integrations.emergentagent.com')
     
     await db.api_settings.delete_many({})
     await db.api_settings.insert_one(settings_dict)
