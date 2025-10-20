@@ -152,61 +152,94 @@ async def get_api_settings():
     return settings
 
 async def stream_ai_completion(prompt: str, settings: dict):
-    """Stream AI completion from OpenAI-compatible endpoint"""
+    """Stream AI completion using emergentintegrations or fallback to non-streaming"""
     api_key = settings.get('api_key')
-    api_endpoint = settings.get('api_endpoint', 'https://api.openai.com/v1')
     model_name = settings.get('model_name', 'gpt-4o')
     temperature = settings.get('temperature', 0.7)
     max_tokens = settings.get('max_tokens', 2000)
+    use_custom_api = settings.get('use_custom_api', False)
     
     if not api_key:
         raise HTTPException(status_code=400, detail="API key not configured")
     
-    # For integration proxy, use /v1/chat/completions
-    # For standard OpenAI, ensure /chat/completions
-    if 'integrations.emergentagent.com' in api_endpoint:
-        if not api_endpoint.endswith('/v1/chat/completions'):
-            api_endpoint = api_endpoint.rstrip('/') + '/v1/chat/completions'
-    else:
-        if not api_endpoint.endswith('/chat/completions'):
-            if api_endpoint.endswith('/'):
-                api_endpoint = api_endpoint + 'chat/completions'
-            else:
-                api_endpoint = api_endpoint + '/chat/completions'
-    
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    
-    payload = {
-        "model": model_name,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "stream": True
-    }
-    
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        async with client.stream('POST', api_endpoint, headers=headers, json=payload) as response:
-            if response.status_code != 200:
-                error_text = await response.aread()
-                raise HTTPException(status_code=response.status_code, detail=f"API Error: {error_text.decode()}")
+    try:
+        # Use emergentintegrations for Emergent key
+        if not use_custom_api:
+            client = OpenAI(api_key=api_key)
             
-            async for line in response.aiter_lines():
-                if line.startswith('data: '):
-                    data = line[6:]
-                    if data.strip() == '[DONE]':
-                        break
-                    try:
-                        chunk = json.loads(data)
-                        if 'choices' in chunk and len(chunk['choices']) > 0:
-                            delta = chunk['choices'][0].get('delta', {})
-                            content = delta.get('content', '')
-                            if content:
-                                yield content
-                    except json.JSONDecodeError:
-                        continue
+            # Try streaming first
+            try:
+                stream = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=True
+                )
+                
+                for chunk in stream:
+                    if chunk.choices and len(chunk.choices) > 0:
+                        delta = chunk.choices[0].delta
+                        if hasattr(delta, 'content') and delta.content:
+                            yield delta.content
+            except Exception as stream_error:
+                # Fallback to non-streaming
+                logging.info(f"Streaming failed, using non-streaming: {stream_error}")
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=False
+                )
+                if response.choices and len(response.choices) > 0:
+                    yield response.choices[0].message.content
+        else:
+            # Custom API endpoint - use httpx
+            api_endpoint = settings.get('api_endpoint', 'https://api.openai.com/v1')
+            
+            if not api_endpoint.endswith('/chat/completions'):
+                if api_endpoint.endswith('/'):
+                    api_endpoint = api_endpoint + 'chat/completions'
+                else:
+                    api_endpoint = api_endpoint + '/chat/completions'
+            
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "model": model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": True
+            }
+            
+            async with httpx.AsyncClient(timeout=60.0) as http_client:
+                async with http_client.stream('POST', api_endpoint, headers=headers, json=payload) as response:
+                    if response.status_code != 200:
+                        error_text = await response.aread()
+                        raise HTTPException(status_code=response.status_code, detail=f"API Error: {error_text.decode()}")
+                    
+                    async for line in response.aiter_lines():
+                        if line.startswith('data: '):
+                            data = line[6:]
+                            if data.strip() == '[DONE]':
+                                break
+                            try:
+                                chunk = json.loads(data)
+                                if 'choices' in chunk and len(chunk['choices']) > 0:
+                                    delta = chunk['choices'][0].get('delta', {})
+                                    content = delta.get('content', '')
+                                    if content:
+                                        yield content
+                            except json.JSONDecodeError:
+                                continue
+    except Exception as e:
+        logging.error(f"AI completion error: {e}")
+        raise HTTPException(status_code=500, detail=f"AI completion failed: {str(e)}")
 
 def generate_expansion_prompt(notes: str, book_type: str, style: str, target_words: int, 
                               book_context: dict, previous_content: str = "") -> str:
