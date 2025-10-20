@@ -161,12 +161,17 @@ async def stream_ai_completion(prompt: str, settings: dict):
     if not api_key:
         raise HTTPException(status_code=400, detail="API key not configured")
     
-    # Ensure endpoint has /chat/completions
-    if not api_endpoint.endswith('/chat/completions'):
-        if api_endpoint.endswith('/'):
-            api_endpoint = api_endpoint + 'chat/completions'
-        else:
-            api_endpoint = api_endpoint + '/chat/completions'
+    # For integration proxy, use /v1/chat/completions
+    # For standard OpenAI, ensure /chat/completions
+    if 'integrations.emergentagent.com' in api_endpoint:
+        if not api_endpoint.endswith('/v1/chat/completions'):
+            api_endpoint = api_endpoint.rstrip('/') + '/v1/chat/completions'
+    else:
+        if not api_endpoint.endswith('/chat/completions'):
+            if api_endpoint.endswith('/'):
+                api_endpoint = api_endpoint + 'chat/completions'
+            else:
+                api_endpoint = api_endpoint + '/chat/completions'
     
     headers = {
         "Authorization": f"Bearer {api_key}",
