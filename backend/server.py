@@ -164,35 +164,28 @@ async def stream_ai_completion(prompt: str, settings: dict):
     try:
         # Use emergentintegrations for Emergent key
         if not use_custom_api:
-            client = OpenAI(api_key=api_key)
+            llm_chat = LlmChat(api_key=api_key, model=model_name)
             
-            # Try streaming first
+            # Try streaming with emergentintegrations
             try:
-                stream = client.chat.completions.create(
-                    model=model_name,
-                    messages=[{"role": "user", "content": prompt}],
+                response = await llm_chat.chat_streaming(
+                    prompt=prompt,
                     temperature=temperature,
-                    max_tokens=max_tokens,
-                    stream=True
+                    max_tokens=max_tokens
                 )
                 
-                for chunk in stream:
-                    if chunk.choices and len(chunk.choices) > 0:
-                        delta = chunk.choices[0].delta
-                        if hasattr(delta, 'content') and delta.content:
-                            yield delta.content
+                async for chunk in response:
+                    if chunk:
+                        yield chunk
             except Exception as stream_error:
                 # Fallback to non-streaming
                 logging.info(f"Streaming failed, using non-streaming: {stream_error}")
-                response = client.chat.completions.create(
-                    model=model_name,
-                    messages=[{"role": "user", "content": prompt}],
+                response = await llm_chat.chat(
+                    prompt=prompt,
                     temperature=temperature,
-                    max_tokens=max_tokens,
-                    stream=False
+                    max_tokens=max_tokens
                 )
-                if response.choices and len(response.choices) > 0:
-                    yield response.choices[0].message.content
+                yield response
         else:
             # Custom API endpoint - use httpx
             api_endpoint = settings.get('api_endpoint', 'https://api.openai.com/v1')
