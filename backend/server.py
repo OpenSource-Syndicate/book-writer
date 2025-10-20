@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 import json
 import httpx
 import asyncio
-from emergentintegrations import OpenAI
+from emergentintegrations.llm.openai import LlmChat
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
