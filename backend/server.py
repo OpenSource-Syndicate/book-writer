@@ -139,10 +139,9 @@ async def get_api_settings():
     if not settings:
         # Return default with Emergent LLM key
         emergent_key = os.environ.get('EMERGENT_LLM_KEY', '')
-        integration_proxy = os.environ.get('integration_proxy_url', 'https://integrations.emergentagent.com')
         default_settings = {
             "use_custom_api": False,
-            "api_endpoint": integration_proxy,
+            "api_endpoint": "",
             "api_key": emergent_key,
             "model_name": "gpt-4o",
             "temperature": 0.7,
